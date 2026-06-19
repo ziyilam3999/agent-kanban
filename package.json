@@ -16,9 +16,9 @@
   "dependencies": {
     "@vercel/blob": "^2.4.1",
     "motion": "^12.40.0",
-    "next": "15.5.0",
-    "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "next": "15.5.19",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
   },
   "devDependencies": {
     "@types/jest": "29.5.12",

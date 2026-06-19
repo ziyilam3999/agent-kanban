@@ -14,6 +14,20 @@ import { Drawer } from "./Drawer";
 const POLL_MS = 1500;
 const GLOW_MS = 700;
 
+/**
+ * Tickets visible for the selected session. Tickets carry an 8-char `sessionId`
+ * (v0.2.0+). FALLBACK: when NO ticket is tagged (a stale pre-v0.2.0 snapshot),
+ * show ALL tickets rather than blanking the board.
+ */
+function filterVisible(
+  tickets: Ticket[],
+  sessionId: string | undefined
+): Ticket[] {
+  const anyTagged = tickets.some((t) => t.sessionId);
+  if (!anyTagged) return tickets;
+  return tickets.filter((t) => t.sessionId === sessionId);
+}
+
 export function BoardView({ initial }: { initial: Board }) {
   const reduce = useReducedMotion();
   const params = useSearchParams();
@@ -26,10 +40,11 @@ export function BoardView({ initial }: { initial: Board }) {
   const [fresh, setFresh] = useState<Set<string>>(new Set());
   const [activeCol, setActiveCol] = useState(0);
 
-  // Map of ticket-id -> last-seen column, for per-poll diffing.
-  const prevCols = useRef<Map<string, Column>>(
-    new Map(initial.tickets.map((t) => [t.id, t.column]))
-  );
+  // Map of ticket-id -> last-seen column, for per-poll diffing. Scoped to the
+  // selected session (see the session-change reset effect below).
+  const prevCols = useRef<Map<string, Column>>(new Map());
+  // Latest selected-session id, readable inside the (deps-empty) poll closure.
+  const currentSessionIdRef = useRef<string | undefined>(undefined);
   const stripRef = useRef<HTMLDivElement>(null);
   const glowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -44,14 +59,20 @@ export function BoardView({ initial }: { initial: Board }) {
         const next: Board = await res.json();
         if (!alive) return;
 
+        // Diff only the SELECTED session's tickets so movement/fresh glow is
+        // per-session (the full board carries every session's tickets now).
+        const nextVisible = filterVisible(
+          next.tickets,
+          currentSessionIdRef.current
+        );
         const movedNow = new Set<string>();
         const freshNow = new Set<string>();
-        for (const t of next.tickets) {
+        for (const t of nextVisible) {
           const prev = prevCols.current.get(t.id);
           if (prev === undefined) freshNow.add(t.id);
           else if (prev !== t.column) movedNow.add(t.id);
         }
-        prevCols.current = new Map(next.tickets.map((t) => [t.id, t.column]));
+        prevCols.current = new Map(nextVisible.map((t) => [t.id, t.column]));
 
         setBoard(next);
         setNow(Date.now());
@@ -93,6 +114,32 @@ export function BoardView({ initial }: { initial: Board }) {
     null;
   const isLive = !!currentSession?.live;
 
+  // ---- Tickets visible for the selected session ----
+  // Tickets carry an 8-char `sessionId` (v0.2.0+); filter to the selected session.
+  // FALLBACK: if NO ticket is tagged (a stale pre-v0.2.0 snapshot), show ALL tickets
+  // instead of blanking the board. Match the ticket's 8-char id to currentSession.id.
+  const visible = useMemo(
+    () => filterVisible(board.tickets, currentSession?.id),
+    [board.tickets, currentSession?.id]
+  );
+
+  // Keep the poll closure's session id current.
+  currentSessionIdRef.current = currentSession?.id;
+
+  // Re-key the poll-diff baseline whenever the selected session changes, so
+  // switching sessions does NOT falsely flag every new-session card as moved/fresh.
+  useEffect(() => {
+    prevCols.current = new Map(
+      filterVisible(board.tickets, currentSession?.id).map((t) => [
+        t.id,
+        t.column,
+      ])
+    );
+    setMoved(new Set());
+    setFresh(new Set());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSession?.id]);
+
   // ---- Tickets grouped by column, newest-updated first ----
   const grouped = useMemo(() => {
     const g: Record<Column, Ticket[]> = {
@@ -101,10 +148,10 @@ export function BoardView({ initial }: { initial: Board }) {
       in_review: [],
       done: [],
     };
-    for (const t of board.tickets) g[t.column].push(t);
+    for (const t of visible) g[t.column].push(t);
     for (const c of COLUMNS) g[c].sort((a, b) => b.updatedAt - a.updatedAt);
     return g;
-  }, [board.tickets]);
+  }, [visible]);
 
   const onStripScroll = useCallback(() => {
     const el = stripRef.current;
@@ -122,7 +169,7 @@ export function BoardView({ initial }: { initial: Board }) {
   }
 
   const selectedTicket = selectedId
-    ? board.tickets.find((t) => t.id === selectedId) ?? null
+    ? visible.find((t) => t.id === selectedId) ?? null
     : null;
 
   return (
@@ -146,7 +193,7 @@ export function BoardView({ initial }: { initial: Board }) {
             {isLive ? "LIVE" : "IDLE"}
           </span>
         </div>
-        <PipelineMeter tickets={board.tickets} />
+        <PipelineMeter tickets={visible} />
       </header>
 
       <main>
@@ -231,7 +278,11 @@ export function BoardView({ initial }: { initial: Board }) {
         </div>
       </main>
 
-      <Drawer ticket={selectedTicket} onClose={() => setSelectedId(null)} />
+      <Drawer
+        ticket={selectedTicket}
+        nowMs={now}
+        onClose={() => setSelectedId(null)}
+      />
     </div>
   );
 }

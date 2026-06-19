@@ -24,6 +24,8 @@ export interface LedgerComment {
   artifact?: string;
   /** Present when the role was explicitly skipped inline. */
   skipReason?: string;
+  /** Review decision for review roles (e.g. APPROVE / BLOCK / SHIP-WITH-FIXES). Trimmed + length-capped. */
+  verdict?: string;
 }
 
 /** One ticket = one ~/.claude/tasks/<session>/<id>.json joined with its ledger. */
@@ -41,6 +43,12 @@ export interface Ticket {
   comments: LedgerComment[];
   /** ms epoch of the task file mtime — used for ordering + "last updated". */
   updatedAt: number;
+  /**
+   * 8-char id of the session this ticket belongs to — matches `SessionSummary.id`.
+   * OPTIONAL for back-compat: snapshots exported before v0.2.0 carry no sessionId;
+   * the view falls back to showing all tickets when none is tagged.
+   */
+  sessionId?: string;
 }
 
 /** A selectable session (one board). */

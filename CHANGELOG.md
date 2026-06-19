@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. Format mirrors content-pipeline
 (semantic-release-style): each release lists Features / Bug Fixes with PR links.
 
+## [0.1.1] — 2026-06-19
+
+### Bug Fixes
+
+* **security:** bump Next.js `15.5.0 → 15.5.19` and React/React-DOM `19.1.0 → 19.2.7` to
+  remediate **CVE-2025-66478 / CVE-2025-55182 (React2Shell)** — a CVSS 10.0 remote-code-execution
+  flaw in the React Server Components protocol affecting App Router apps. The 15.5 line is fixed
+  in 15.5.7+; this takes the latest patch. No secret rotation required (the deploy had no secrets
+  wired). Typecheck, 34 jest tests, and `next build` all green on the new versions.
+
 ## [0.1.0] — 2026-06-19
 
 First public release: a phone-first, dark "mission-control" board that mirrors AI-agent /

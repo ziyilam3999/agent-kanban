@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. Format mirrors content-pipeline
 (semantic-release-style): each release lists Features / Bug Fixes with PR links.
 
+## [0.2.1] — 2026-06-19
+
+### Bug Fixes
+
+* **drawer:** suppress the noisy `+0s` elapsed label on near-simultaneous timeline steps — a
+  sub-second gap (e.g. a retroactively batch-logged ledger, or two roles back-to-back) now renders
+  no gap label instead of `+0s` on every node. Real spaced-out steps (`+15m`, `+2h`) are unchanged. (#6)
+
 ## [0.2.0] — 2026-06-19
 
 ### Features

@@ -15,7 +15,7 @@ import {
   roleColor,
   roleLabel,
 } from "@/lib/ui-meta";
-import { relativeTime } from "@/lib/relative-time";
+import { relativeTime, elapsedGap } from "@/lib/relative-time";
 
 interface DrawerProps {
   ticket: Ticket | null;
@@ -32,22 +32,6 @@ function localClock(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-/** Compact elapsed gap between two adjacent ISO timestamps, e.g. "+15m". null if unknown/negative. */
-function elapsedGap(prevIso: string, iso: string): string | null {
-  const d = Date.parse(iso) - Date.parse(prevIso);
-  if (!Number.isFinite(d) || d < 0) return null;
-  // Near-simultaneous steps (e.g. a retroactively batch-logged ledger) render NO gap rather than a
-  // noisy "+0s" on every node — a sub-second delta carries no signal. Real spaced-out steps still show.
-  if (d < 1000) return null;
-  const s = Math.floor(d / 1000);
-  if (s < 60) return `+${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `+${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `+${h}h`;
-  return `+${Math.floor(h / 24)}d`;
 }
 
 /**

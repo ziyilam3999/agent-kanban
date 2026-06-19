@@ -140,20 +140,27 @@ function main(): void {
     buildSessionSummary(s.sessionId, s.lastActiveMs, s.taskFiles.length, now)
   );
 
-  // Choose the session: env override, else the newest (first).
+  // Choose the session: env override, else the newest (first). This drives the
+  // DEFAULT picker selection + the LIVE badge, but tickets are exported for ALL
+  // sessions so switching the picker changes the rendered cards (v0.2.0 #3 fix).
   const chosenFull = process.env.SESSION_ID || sessions[0].sessionId;
   const chosen =
     sessions.find((s) => s.sessionId === chosenFull) ?? sessions[0];
 
-  // Build tickets for the chosen session.
-  const tickets = chosen.taskFiles
-    .map((file) => {
-      const parsed = readTask(file);
-      if (!parsed) return null;
-      const ledger = readLedger(chosen.sessionId, parsed.task.id);
-      return buildTicket(parsed.task, ledger, parsed.mtimeMs);
+  // Build tickets for EVERY non-excluded session, each tagged with its own
+  // 8-char sessionId (matches SessionSummary.id) so the view can filter per-session.
+  const tickets = sessions
+    .flatMap((s) => {
+      const sid = s.sessionId.slice(0, 8);
+      return s.taskFiles
+        .map((file) => {
+          const parsed = readTask(file);
+          if (!parsed) return null;
+          const ledger = readLedger(s.sessionId, parsed.task.id);
+          return buildTicket(parsed.task, ledger, parsed.mtimeMs, sid);
+        })
+        .filter((t): t is NonNullable<typeof t> => t !== null);
     })
-    .filter((t): t is NonNullable<typeof t> => t !== null)
     // newest-updated first within a column-agnostic list
     .sort((a, b) => b.updatedAt - a.updatedAt);
 
@@ -175,7 +182,7 @@ function main(): void {
   for (const t of tickets) counts[t.column] = (counts[t.column] ?? 0) + 1;
   const summary = COLUMNS.map((c) => `${c}=${counts[c]}`).join(" ");
   console.log(
-    `export-board: session ${board.sessionId} · ${tickets.length} tickets · ${summary} · ${sessionSummaries.length} sessions → ${OUT}`
+    `export-board: active ${board.sessionId} · ${tickets.length} tickets across ${sessionSummaries.length} sessions · ${summary} → ${OUT}`
   );
 }
 

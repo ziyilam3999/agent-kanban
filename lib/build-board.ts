@@ -34,7 +34,12 @@ export interface RawLedgerLine {
   artifact_path?: string;
   skip_reason?: string;
   oracle?: string;
+  /** Review decision written by a review role (plan-review / execution-review / ship-review). */
+  verdict?: string;
 }
+
+/** Max characters kept for a verdict pill — long verdicts are truncated. */
+export const VERDICT_MAX_LEN = 24;
 
 // Home-path patterns. NO hardcoded username — every <name> segment is a wildcard.
 // Matched up to (but not including) the next path separator or whitespace.
@@ -105,6 +110,10 @@ function toComment(line: RawLedgerLine): LedgerComment {
   if (line.agentId) c.agentId = line.agentId;
   if (line.artifact_path) c.artifact = redact(basenameOf(line.artifact_path));
   if (line.skip_reason) c.skipReason = line.skip_reason;
+  if (typeof line.verdict === "string") {
+    const v = redact(line.verdict.trim()).slice(0, VERDICT_MAX_LEN);
+    if (v) c.verdict = v;
+  }
   return c;
 }
 
@@ -115,7 +124,8 @@ function toComment(line: RawLedgerLine): LedgerComment {
 export function buildTicket(
   rawTask: RawTask,
   ledgerLines: RawLedgerLine[],
-  mtimeMs: number
+  mtimeMs: number,
+  sessionId?: string
 ): Ticket {
   const comments = [...ledgerLines]
     .sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts))
@@ -125,7 +135,7 @@ export function buildTicket(
     (l) => l.role === "execution-review"
   );
 
-  return {
+  const ticket: Ticket = {
     id: rawTask.id,
     subject: rawTask.subject,
     description: redact(rawTask.description ?? ""),
@@ -135,6 +145,8 @@ export function buildTicket(
     comments,
     updatedAt: mtimeMs,
   };
+  if (sessionId) ticket.sessionId = sessionId;
+  return ticket;
 }
 
 /** Human-friendly relative-time fragment, e.g. "just now", "2m", "3h", "5d". */

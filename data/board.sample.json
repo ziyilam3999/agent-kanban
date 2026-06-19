@@ -3,9 +3,9 @@
   "generatedAt": 1750300000000,
   "sessionId": "demo-session-0001",
   "sessions": [
-    { "id": "demo-ses", "label": "active just now · 6 tickets", "lastActive": 1750300000000, "ticketCount": 6, "live": true },
-    { "id": "a1b2c3d4", "label": "active 2h ago · 12 tickets", "lastActive": 1750292800000, "ticketCount": 12, "live": false },
-    { "id": "f9e8d7c6", "label": "active yesterday · 4 tickets", "lastActive": 1750210000000, "ticketCount": 4, "live": false }
+    { "id": "demo-ses", "label": "active just now · 4 tickets", "lastActive": 1750300000000, "ticketCount": 4, "live": true },
+    { "id": "a1b2c3d4", "label": "active 2h ago · 3 tickets", "lastActive": 1750292800000, "ticketCount": 3, "live": false },
+    { "id": "f9e8d7c6", "label": "active yesterday · 2 tickets", "lastActive": 1750210000000, "ticketCount": 2, "live": false }
   ],
   "tickets": [
     {
@@ -16,17 +16,8 @@
       "status": "pending",
       "blockedBy": [],
       "comments": [],
-      "updatedAt": 1750299000000
-    },
-    {
-      "id": "202",
-      "subject": "Repost the 7 launch videos as Shorts",
-      "description": "Backfill the existing 9:16 cuts to the channel, spaced if throttled.",
-      "column": "todo",
-      "status": "pending",
-      "blockedBy": ["201"],
-      "comments": [],
-      "updatedAt": 1750298500000
+      "updatedAt": 1750299000000,
+      "sessionId": "demo-ses"
     },
     {
       "id": "203",
@@ -37,23 +28,11 @@
       "blockedBy": [],
       "comments": [
         { "role": "planner", "ts": "2026-06-19T15:40:33.947Z", "agentId": "a896e877", "artifact": "2026-06-19-203-exporter.md" },
-        { "role": "plan-review", "ts": "2026-06-19T15:40:56.793Z", "agentId": "a92d2564", "artifact": "203-plan-review.md" },
+        { "role": "plan-review", "ts": "2026-06-19T15:40:56.793Z", "agentId": "a92d2564", "artifact": "203-plan-review.md", "verdict": "APPROVE-WITH-NOTES" },
         { "role": "executor", "ts": "2026-06-19T15:59:05.525Z", "agentId": "a7050bc2" }
       ],
-      "updatedAt": 1750299500000
-    },
-    {
-      "id": "204",
-      "subject": "Wire the live-sync courier (Blob upload + 1–2s poll)",
-      "description": "Local hook re-exports on change and uploads the snapshot to a private blob the phone polls.",
-      "column": "in_progress",
-      "status": "in_progress",
-      "blockedBy": [],
-      "comments": [
-        { "role": "planner", "ts": "2026-06-19T16:02:00.000Z", "agentId": "b1c2d3e4", "artifact": "2026-06-19-204-courier.md" },
-        { "role": "executor", "ts": "2026-06-19T16:15:00.000Z", "agentId": "c4d5e6f7" }
-      ],
-      "updatedAt": 1750299700000
+      "updatedAt": 1750299500000,
+      "sessionId": "demo-ses"
     },
     {
       "id": "205",
@@ -64,11 +43,12 @@
       "blockedBy": [],
       "comments": [
         { "role": "planner", "ts": "2026-06-19T14:10:00.000Z", "agentId": "d7e8f9a0", "artifact": "2026-06-19-205-ui.md" },
-        { "role": "plan-review", "ts": "2026-06-19T14:25:00.000Z", "agentId": "e0f1a2b3", "artifact": "205-plan-review.md" },
+        { "role": "plan-review", "ts": "2026-06-19T14:25:00.000Z", "agentId": "e0f1a2b3", "artifact": "205-plan-review.md", "verdict": "APPROVE" },
         { "role": "executor", "ts": "2026-06-19T15:05:00.000Z", "agentId": "f3a4b5c6", "artifact": "BoardView.tsx" },
-        { "role": "execution-review", "ts": "2026-06-19T15:30:00.000Z", "agentId": "a6b7c8d9", "artifact": "205-exec-review.md" }
+        { "role": "execution-review", "ts": "2026-06-19T15:30:00.000Z", "agentId": "a6b7c8d9", "artifact": "205-exec-review.md", "verdict": "SHIP-WITH-FIXES" }
       ],
-      "updatedAt": 1750299800000
+      "updatedAt": 1750299800000,
+      "sessionId": "demo-ses"
     },
     {
       "id": "206",
@@ -80,9 +60,81 @@
       "comments": [
         { "role": "planner", "ts": "2026-06-19T13:00:00.000Z", "agentId": "11223344", "artifact": "2026-06-19-206-scaffold.md" },
         { "role": "executor", "ts": "2026-06-19T13:20:00.000Z", "agentId": "55667788", "artifact": "ci.yml" },
-        { "role": "execution-review", "ts": "2026-06-19T13:45:00.000Z", "agentId": "99aabbcc", "artifact": "206-exec-review.md" }
+        { "role": "execution-review", "ts": "2026-06-19T13:45:00.000Z", "agentId": "99aabbcc", "artifact": "206-exec-review.md", "verdict": "PASS" }
       ],
-      "updatedAt": 1750299900000
+      "updatedAt": 1750299900000,
+      "sessionId": "demo-ses"
+    },
+    {
+      "id": "202",
+      "subject": "Repost the 7 launch videos as Shorts",
+      "description": "Backfill the existing 9:16 cuts to the channel, spaced if throttled.",
+      "column": "todo",
+      "status": "pending",
+      "blockedBy": ["204"],
+      "comments": [],
+      "updatedAt": 1750292800000,
+      "sessionId": "a1b2c3d4"
+    },
+    {
+      "id": "204",
+      "subject": "Wire the live-sync courier (Blob upload + 1–2s poll)",
+      "description": "Local hook re-exports on change and uploads the snapshot to a private blob the phone polls.",
+      "column": "in_progress",
+      "status": "in_progress",
+      "blockedBy": [],
+      "comments": [
+        { "role": "planner", "ts": "2026-06-19T12:02:00.000Z", "agentId": "b1c2d3e4", "artifact": "2026-06-19-204-courier.md" },
+        { "role": "executor", "ts": "2026-06-19T12:15:00.000Z", "agentId": "c4d5e6f7" }
+      ],
+      "updatedAt": 1750292600000,
+      "sessionId": "a1b2c3d4"
+    },
+    {
+      "id": "207",
+      "subject": "Migrate the metrics store to the columnar schema",
+      "description": "Re-shape the per-event rows into a columnar layout; backfill, then dual-write during cutover.",
+      "column": "in_review",
+      "status": "in_progress",
+      "blockedBy": [],
+      "comments": [
+        { "role": "planner", "ts": "2026-06-19T11:00:00.000Z", "agentId": "1a2b3c4d", "artifact": "2026-06-19-207-metrics.md" },
+        { "role": "plan-review", "ts": "2026-06-19T11:18:00.000Z", "agentId": "2b3c4d5e", "artifact": "207-plan-review.md", "verdict": "APPROVE-WITH-NOTES" },
+        { "role": "executor", "ts": "2026-06-19T11:55:00.000Z", "agentId": "3c4d5e6f", "artifact": "metrics-store.ts" },
+        { "role": "execution-review", "ts": "2026-06-19T12:10:00.000Z", "agentId": "4d5e6f7a", "artifact": "207-exec-review.md", "verdict": "BLOCK" }
+      ],
+      "updatedAt": 1750292400000,
+      "sessionId": "a1b2c3d4"
+    },
+    {
+      "id": "208",
+      "subject": "Add a rate-limit budget to the outbound queue",
+      "description": "Token-bucket per destination; shed load gracefully when a destination throttles.",
+      "column": "in_progress",
+      "status": "in_progress",
+      "blockedBy": [],
+      "comments": [
+        { "role": "planner", "ts": "2026-06-18T09:00:00.000Z", "agentId": "5e6f7a8b", "artifact": "2026-06-18-208-ratelimit.md" },
+        { "role": "executor", "ts": "2026-06-18T09:40:00.000Z", "agentId": "6f7a8b9c" }
+      ],
+      "updatedAt": 1750210000000,
+      "sessionId": "f9e8d7c6"
+    },
+    {
+      "id": "209",
+      "subject": "Ship the nightly digest email",
+      "description": "Roll up the day's pipeline events into a single digest; send at 7am local.",
+      "column": "done",
+      "status": "completed",
+      "blockedBy": [],
+      "comments": [
+        { "role": "planner", "ts": "2026-06-18T08:00:00.000Z", "agentId": "7a8b9c0d", "artifact": "2026-06-18-209-digest.md" },
+        { "role": "plan-review", "ts": "2026-06-18T08:12:00.000Z", "agentId": "8b9c0d1e", "artifact": "209-plan-review.md", "verdict": "APPROVE" },
+        { "role": "executor", "ts": "2026-06-18T08:45:00.000Z", "agentId": "9c0d1e2f", "artifact": "digest.ts" },
+        { "role": "execution-review", "ts": "2026-06-18T09:05:00.000Z", "agentId": "0d1e2f3a", "artifact": "209-exec-review.md", "verdict": "SHIP-WITH-FIXES" }
+      ],
+      "updatedAt": 1750209500000,
+      "sessionId": "f9e8d7c6"
     }
   ]
 }

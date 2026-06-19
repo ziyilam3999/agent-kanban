@@ -3,6 +3,20 @@
 All notable changes to this project are documented here. Format mirrors content-pipeline
 (semantic-release-style): each release lists Features / Bug Fixes with PR links.
 
+## [0.2.0] — 2026-06-19
+
+### Features
+
+* **session-picker filtering:** the exporter now tags every session's tickets with an 8-char
+  `sessionId` and exports **all** sessions; the board filters to the selected session (with an
+  all-tickets fallback so a stale snapshot never blanks the board), and the poll-diff is re-keyed
+  per session. Switching sessions in the picker now actually changes the cards. (#4)
+* **deep timeline drawer:** each role node can carry a **verdict pill** (green = APPROVE/PASS,
+  amber = WITH-FIXES/NOTES, red = BLOCK/FAIL), timestamps are relative + local with
+  elapsed-between-steps, and a 4-step pipeline-progress header (planner → plan-review → executor →
+  exec-review) shows stages done + current/next. `LedgerComment.verdict` is read-through;
+  populating real verdicts is a follow-up ai-brain ledger `--verdict` write flag. (#4)
+
 ## [0.1.1] — 2026-06-19
 
 ### Bug Fixes

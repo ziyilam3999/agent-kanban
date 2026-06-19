@@ -1,0 +1,88 @@
+{
+  "schema": 1,
+  "generatedAt": 1750300000000,
+  "sessionId": "demo-session-0001",
+  "sessions": [
+    { "id": "demo-ses", "label": "active just now · 6 tickets", "lastActive": 1750300000000, "ticketCount": 6, "live": true },
+    { "id": "a1b2c3d4", "label": "active 2h ago · 12 tickets", "lastActive": 1750292800000, "ticketCount": 12, "live": false },
+    { "id": "f9e8d7c6", "label": "active yesterday · 4 tickets", "lastActive": 1750210000000, "ticketCount": 4, "live": false }
+  ],
+  "tickets": [
+    {
+      "id": "201",
+      "subject": "Add OAuth refresh-token flow to the publish adapter",
+      "description": "Exchange the long-lived refresh token for a short-lived access token on each run; cache in-process.",
+      "column": "todo",
+      "status": "pending",
+      "blockedBy": [],
+      "comments": [],
+      "updatedAt": 1750299000000
+    },
+    {
+      "id": "202",
+      "subject": "Repost the 7 launch videos as Shorts",
+      "description": "Backfill the existing 9:16 cuts to the channel, spaced if throttled.",
+      "column": "todo",
+      "status": "pending",
+      "blockedBy": ["201"],
+      "comments": [],
+      "updatedAt": 1750298500000
+    },
+    {
+      "id": "203",
+      "subject": "Build the board exporter (tasks ↔ ledger join)",
+      "description": "Join the local task store with the 3-role ledger, redact home paths, derive columns, emit a snapshot.",
+      "column": "in_progress",
+      "status": "in_progress",
+      "blockedBy": [],
+      "comments": [
+        { "role": "planner", "ts": "2026-06-19T15:40:33.947Z", "agentId": "a896e877", "artifact": "2026-06-19-203-exporter.md" },
+        { "role": "plan-review", "ts": "2026-06-19T15:40:56.793Z", "agentId": "a92d2564", "artifact": "203-plan-review.md" },
+        { "role": "executor", "ts": "2026-06-19T15:59:05.525Z", "agentId": "a7050bc2" }
+      ],
+      "updatedAt": 1750299500000
+    },
+    {
+      "id": "204",
+      "subject": "Wire the live-sync courier (Blob upload + 1–2s poll)",
+      "description": "Local hook re-exports on change and uploads the snapshot to a private blob the phone polls.",
+      "column": "in_progress",
+      "status": "in_progress",
+      "blockedBy": [],
+      "comments": [
+        { "role": "planner", "ts": "2026-06-19T16:02:00.000Z", "agentId": "b1c2d3e4", "artifact": "2026-06-19-204-courier.md" },
+        { "role": "executor", "ts": "2026-06-19T16:15:00.000Z", "agentId": "c4d5e6f7" }
+      ],
+      "updatedAt": 1750299700000
+    },
+    {
+      "id": "205",
+      "subject": "Design the mobile-first board UI",
+      "description": "Bold, non-generic Kanban surface; cards + a per-ticket audit drawer; session picker with a live badge.",
+      "column": "in_review",
+      "status": "in_progress",
+      "blockedBy": [],
+      "comments": [
+        { "role": "planner", "ts": "2026-06-19T14:10:00.000Z", "agentId": "d7e8f9a0", "artifact": "2026-06-19-205-ui.md" },
+        { "role": "plan-review", "ts": "2026-06-19T14:25:00.000Z", "agentId": "e0f1a2b3", "artifact": "205-plan-review.md" },
+        { "role": "executor", "ts": "2026-06-19T15:05:00.000Z", "agentId": "f3a4b5c6", "artifact": "BoardView.tsx" },
+        { "role": "execution-review", "ts": "2026-06-19T15:30:00.000Z", "agentId": "a6b7c8d9", "artifact": "205-exec-review.md" }
+      ],
+      "updatedAt": 1750299800000
+    },
+    {
+      "id": "206",
+      "subject": "Bootstrap the public repo + CI + changelog",
+      "description": "gitignore-first, mirror the CI matrix + conventional-commit gate + privacy gate.",
+      "column": "done",
+      "status": "completed",
+      "blockedBy": [],
+      "comments": [
+        { "role": "planner", "ts": "2026-06-19T13:00:00.000Z", "agentId": "11223344", "artifact": "2026-06-19-206-scaffold.md" },
+        { "role": "executor", "ts": "2026-06-19T13:20:00.000Z", "agentId": "55667788", "artifact": "ci.yml" },
+        { "role": "execution-review", "ts": "2026-06-19T13:45:00.000Z", "agentId": "99aabbcc", "artifact": "206-exec-review.md" }
+      ],
+      "updatedAt": 1750299900000
+    }
+  ]
+}

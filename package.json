@@ -1,0 +1,36 @@
+{
+  "name": "agent-kanban",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Universal live Kanban board — operator visibility into agent / 3-role-model work. Local files are the source of truth; the web board is a synced, login-gated view.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "export:board": "tsx scripts/export-board.ts",
+    "kanban:upload": "tsx scripts/upload-board.ts",
+    "kanban:sync": "tsx scripts/export-board.ts && tsx scripts/upload-board.ts"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.4.1",
+    "motion": "^12.40.0",
+    "next": "15.5.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@types/jest": "29.5.12",
+    "@types/node": "20.14.0",
+    "@types/react": "19.1.0",
+    "@types/react-dom": "19.1.0",
+    "jest": "29.7.0",
+    "ts-jest": "29.2.5",
+    "tsx": "^4.22.4",
+    "typescript": "5.6.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

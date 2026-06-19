@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node-version: [20]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck (tsc --noEmit — strict, must exit 0)
+        run: npm run typecheck
+
+      - name: Tests (jest)
+        run: npm test
+
+      # Conventional Commits gate (mirrors content-pipeline). eslint is intentionally
+      # deferred until a ruleset is agreed, to avoid a day-1 style-only red board.
+      - name: Validate commit message
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          COMMIT_MSG=$(git log -1 --pretty=%s)
+          if echo "$COMMIT_MSG" | grep -qE "^Merge "; then exit 0; fi
+          if ! echo "$COMMIT_MSG" | grep -qE "^(feat|fix|docs|chore|refactor|test|style|perf|ci|build|revert)(\(.+\))?(!)?: .+"; then
+            echo "ERROR: HEAD commit message does not follow Conventional Commits format."
+            echo "  Got: $COMMIT_MSG"
+            echo "  Expected: <type>(<optional scope>): <description>"
+            exit 1
+          fi
+          echo "commit message OK: $COMMIT_MSG"
+
+  privacy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The repo is PUBLIC but the board surfaces internal task content. The data
+      # snapshot is gitignored and injected out-of-band; this gate fails the build
+      # if a home path or a board snapshot ever gets committed by mistake.
+      - name: No home paths or data snapshots in tracked files
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Home-path class (no hard-coded username): /Users/<name>/, /home/<name>/, C:/Users/<name>/
+          # __tests__ is exempt: the redaction unit tests MUST carry synthetic home-path-shaped
+          # fixtures (e.g. /Users/alice/) as inputs to prove redact() strips them — those are
+          # fictional placeholders, never a real operator path (the real data file is gitignored).
+          if git grep -nIE '(/Users/|/home/|[A-Za-z]:[\\/]Users[\\/])[A-Za-z0-9._-]+/' -- . ':!*.example' ':!.github/workflows/ci.yml' ':!__tests__/*'; then
+            echo "ERROR: a home path is committed. Use os.homedir() / ~ — never an absolute home path."
+            exit 1
+          fi
+          # Flag ANY tracked board snapshot/backup under data/ except the synthetic sample.
+          if git ls-files 'data/*' | grep -E 'board' | grep -vE '(^|/)board\.sample\.json$'; then
+            echo "ERROR: a board data snapshot/backup is tracked under data/. It must stay gitignored (private data)."
+            exit 1
+          fi
+          if git ls-files | grep -E '(^|/)board\.json$|\.board\.json$|\.private-bak$'; then
+            echo "ERROR: a board data snapshot is tracked. It must stay gitignored (private data)."
+            exit 1
+          fi
+          echo "privacy gate OK: no home paths, no tracked board snapshots."

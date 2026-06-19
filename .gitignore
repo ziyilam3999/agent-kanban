@@ -1,0 +1,33 @@
+# --- PRIVATE DATA: the board snapshot is internal task content + home paths. NEVER commit. ---
+# The exporter writes here; the deploy injects it out-of-band (blob upload), never via git.
+# /data/board.json* also covers transient backups like board.json.private-bak (real data).
+/data/board.json
+/data/board.json*
+/data/*.board.json
+/public/board.json
+*.board.json
+*.private-bak
+board.json
+
+# --- Secrets / env ---
+.env
+.env.*
+!.env.example
+
+# --- Agent-scratch class (this toolchain drops session-scoped scratch into working trees) ---
+.ai-workspace/
+.claude/
+tmp/
+_quarantine*/
+*.log
+
+# --- Node / Next / Vercel ---
+node_modules/
+.next/
+out/
+.vercel/
+dist/
+*.tsbuildinfo
+
+# --- OS ---
+.DS_Store

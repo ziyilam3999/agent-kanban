@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. Format mirrors content-pipeline
 (semantic-release-style): each release lists Features / Bug Fixes with PR links.
 
+## [0.2.2] — 2026-06-19
+
+### Tests
+
+* **drawer:** unit-test `elapsedGap` — move it from the Drawer component into `lib/relative-time.ts`
+  (pure, dependency-free) and add jest coverage: `<1s ⇒ null` (no noisy `+0s`), negative/unparseable
+  ⇒ null, real gaps render `+Ns/+Nm/+Nh/+Nd`, and unit-boundary thresholds. No runtime behavior change. (#8)
+
 ## [0.2.1] — 2026-06-19
 
 ### Bug Fixes

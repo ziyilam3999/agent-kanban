@@ -3,8 +3,30 @@
 All notable changes to this project are documented here. Format mirrors content-pipeline
 (semantic-release-style): each release lists Features / Bug Fixes with PR links.
 
-## [0.1.0] — unreleased
+## [0.1.0] — 2026-06-19
+
+First public release: a phone-first, dark "mission-control" board that mirrors AI-agent /
+3-role-model work across **To Do → In Progress → In Review → Done**, with a per-ticket
+audit-trail drawer. Local `~/.claude` task + 3-role-ledger files are the source of truth;
+the web view is a synced, login-gated mirror that refreshes every ~1.5s.
 
 ### Features
 
-* **scaffold:** public-repo bootstrap — gitignore-first (agent-scratch + private board snapshot), CI (ubuntu+windows matrix, Node 20, typecheck + jest + Conventional-Commits gate + privacy gate), changelog. The live board surfaces local `~/.claude` task + 3-role-ledger state; local files are the source of truth, the web view is a synced, login-gated mirror.
+* **scaffold:** public-repo bootstrap — gitignore-first (agent-scratch + private board
+  snapshot stay out of git), CI (ubuntu + windows matrix, Node 20, typecheck + jest +
+  Conventional-Commits gate + a privacy gate), CHANGELOG, README.
+* **exporter:** `lib/build-board.ts` + `scripts/export-board.ts` — joins the local task
+  store with the 3-role ledger, **redacts home paths** (`/Users/<name>/`, `/home/<name>/`,
+  `C:\Users\<name>\`), derives the four columns (`in_review` = in_progress + an
+  execution-review ledger line), and detects the active session by newest task-file mtime.
+* **telemetry-console UI:** `app/` + `components/` — bold black-box-telemetry point of view
+  (Martian Mono + Hanken Grotesk, deep-space palette, phosphor live-accent). Phone-first
+  snap-scroll columns with a sticky console header (session picker + LIVE badge + pipeline
+  meter); telemetry cards with role-progress pips; a bottom-sheet per-ticket timeline drawer.
+  Only the card that changed column animates; reduced-motion safe. Validated with ui-evolve
+  (accessibility 96, 0 critical/serious axe issues, perf 98, CLS ~0).
+* **sync courier:** `lib/load-board.ts` + `scripts/upload-board.ts` — `loadBoard()` branches
+  server-side on env (`BOARD_BLOB_URL` → `fetch(url, { cache: 'no-store' })` → local
+  `data/board.json` → synthetic `data/board.sample.json`), so the blob URL/token never reach
+  the browser. The uploader reads `BLOB_READ_WRITE_TOKEN` from the macOS Keychain and writes
+  with a near-zero blob cache so 1–2s polling stays fresh.

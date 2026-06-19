@@ -5,6 +5,7 @@ import {
   buildTicket,
   buildSessionSummary,
   buildBoard,
+  VERDICT_MAX_LEN,
   type RawTask,
   type RawLedgerLine,
 } from "@/lib/build-board";
@@ -161,6 +162,67 @@ describe("buildTicket", () => {
     );
     expect(t.description).not.toContain("/Users/");
     expect(t.updatedAt).toBe(999);
+  });
+
+  it("stamps the 8-char sessionId when one is provided", () => {
+    const t = buildTicket(baseTask(), [], 1, "a1b2c3d4");
+    expect(t.sessionId).toBe("a1b2c3d4");
+  });
+
+  it("omits sessionId entirely when none is provided (back-compat)", () => {
+    const t = buildTicket(baseTask(), [], 1);
+    expect(t.sessionId).toBeUndefined();
+    expect("sessionId" in t).toBe(false);
+  });
+});
+
+describe("buildTicket — verdict pass-through (seam B read side)", () => {
+  it("passes a review verdict through onto the comment", () => {
+    const t = buildTicket(
+      baseTask(),
+      [
+        {
+          role: "plan-review",
+          ts: "2026-06-14T04:58:26.116Z",
+          verdict: "APPROVE-WITH-NOTES",
+        },
+      ],
+      1
+    );
+    expect(t.comments[0].verdict).toBe("APPROVE-WITH-NOTES");
+  });
+
+  it("leaves verdict undefined when the ledger line carries none", () => {
+    const t = buildTicket(
+      baseTask(),
+      [{ role: "executor", ts: "2026-06-14T04:58:26.116Z" }],
+      1
+    );
+    expect(t.comments[0].verdict).toBeUndefined();
+  });
+
+  it("trims surrounding whitespace and drops a whitespace-only verdict", () => {
+    const t = buildTicket(
+      baseTask(),
+      [
+        { role: "plan-review", ts: "2026-06-14T04:58:26.116Z", verdict: "  PASS  " },
+        { role: "execution-review", ts: "2026-06-14T05:58:26.116Z", verdict: "   " },
+      ],
+      1
+    );
+    expect(t.comments[0].verdict).toBe("PASS");
+    expect(t.comments[1].verdict).toBeUndefined();
+  });
+
+  it("length-caps an over-long verdict to VERDICT_MAX_LEN chars", () => {
+    const long = "SHIP-WITH-FIXES-AND-A-VERY-LONG-TRAILING-EXPLANATION";
+    const t = buildTicket(
+      baseTask(),
+      [{ role: "execution-review", ts: "2026-06-14T04:58:26.116Z", verdict: long }],
+      1
+    );
+    expect(t.comments[0].verdict).toHaveLength(VERDICT_MAX_LEN);
+    expect(long.startsWith(t.comments[0].verdict as string)).toBe(true);
   });
 });
 

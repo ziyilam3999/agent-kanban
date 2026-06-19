@@ -38,7 +38,9 @@ function localClock(iso: string): string {
 function elapsedGap(prevIso: string, iso: string): string | null {
   const d = Date.parse(iso) - Date.parse(prevIso);
   if (!Number.isFinite(d) || d < 0) return null;
-  if (d < 1000) return "+0s";
+  // Near-simultaneous steps (e.g. a retroactively batch-logged ledger) render NO gap rather than a
+  // noisy "+0s" on every node — a sub-second delta carries no signal. Real spaced-out steps still show.
+  if (d < 1000) return null;
   const s = Math.floor(d / 1000);
   if (s < 60) return `+${s}s`;
   const m = Math.floor(s / 60);

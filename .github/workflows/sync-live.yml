@@ -1,0 +1,53 @@
+name: sync-live
+
+# Keep the login-gated `live` Vercel preview in lock-step with master.
+#
+# WHY: Production (master) renders SAMPLE data only; the real, login-gated board
+# renders from the `live` branch preview (BOARD_BLOB_URL is a Preview-only env).
+# That preview only rebuilds when the `live` branch receives a push — so without
+# this workflow the live board silently lags every release (it sat on v0.2.1
+# while master shipped v0.3.0). This merges master into `live` on every master
+# push (a --no-ff merge commit guarantees a new commit → Vercel always rebuilds),
+# so the live board is never behind a release again.
+#
+# Pushing to `live` with the default GITHUB_TOKEN does NOT re-trigger CI (ci.yml
+# only watches master + PRs), so there is no recursion; Vercel's own GitHub
+# integration still sees the push and redeploys the live preview.
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+
+# Serialize: if two master pushes land close together, run the syncs in order
+# (never cancel — every release must reach live).
+concurrency:
+  group: sync-live
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the live branch (full history for the merge)
+        uses: actions/checkout@v4
+        with:
+          ref: live
+          fetch-depth: 0
+
+      - name: Merge master into live and push (triggers a Vercel rebuild)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin master
+          # --no-ff forces a merge commit even if it would fast-forward, so the
+          # push is always a NEW commit and Vercel always redeploys. If master is
+          # already fully merged, this is a no-op and nothing is pushed.
+          if git merge --no-ff origin/master -m "chore(live): auto-sync to master ${GITHUB_SHA}"; then
+            git push origin HEAD:live
+          else
+            echo "::error::merge of master into live conflicted — the live branch has diverged from master content (it should only differ by merge commits). Resolve manually." >&2
+            exit 1
+          fi

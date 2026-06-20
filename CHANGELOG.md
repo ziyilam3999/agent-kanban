@@ -3,6 +3,17 @@
 All notable changes to this project are documented here. Format mirrors content-pipeline
 (semantic-release-style): each release lists Features / Bug Fixes with PR links.
 
+## [0.3.0](https://github.com/ziyilam3999/agent-kanban/compare/v0.2.2...v0.3.0) — 2026-06-20
+
+### Features
+
+* **board:** clear arrival-glow when a card lands in a new column. The poll already flags
+  cards that change column, but the old highlight was a faint 0.6s pulse — easy to miss. The
+  `ak-glow` animation now runs 1.4s with a colored halo ring, a border flash, a brief fill
+  tint, and a small scale-pop; `GLOW_MS` holds the flag for the full animation; the
+  reduced-motion fallback gains a matching static border+tint. Transform/shadow/color only —
+  zero CLS, reduced-motion-safe. (#10)
+
 ## [0.2.2] — 2026-06-19
 
 ### Tests

@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { Board, Column, Ticket } from "@/lib/board-schema";
 import { COLUMNS, COLUMN_LABELS } from "@/lib/board-schema";
+import { computeActiveIds } from "@/lib/active";
 import { COLUMN_HUE } from "@/lib/ui-meta";
 import { Card } from "./Card";
 import { PipelineMeter } from "./PipelineMeter";
@@ -14,10 +15,6 @@ import { Drawer } from "./Drawer";
 const POLL_MS = 1500;
 // Hold the moved/fresh flag for the full arrival-glow animation (ak-glow 1.9s).
 const GLOW_MS = 2000;
-// A ticket is "actively in progress right now" (the breathing heartbeat) when
-// it sits in In Progress in a LIVE session and was touched within this window —
-// i.e. the agent's current focus, not just any in_progress card.
-const ACTIVE_WINDOW_MS = 3 * 60 * 1000;
 
 /**
  * Tickets visible for the selected session. Tickets carry an 8-char `sessionId`
@@ -159,19 +156,15 @@ export function BoardView({ initial }: { initial: Board }) {
   }, [visible]);
 
   // ---- Tickets the agent is ACTIVELY working right now (breathing heartbeat) ----
-  // Only in a live session: an in_progress ticket touched within ACTIVE_WINDOW.
-  // `now` advances each poll, so a ticket drops out of "active" when it goes
-  // quiet — the heartbeat naturally stops without any extra signal.
-  const activeIds = useMemo(() => {
-    const s = new Set<string>();
-    if (!isLive) return s;
-    for (const t of visible) {
-      if (t.column === "in_progress" && now - t.updatedAt <= ACTIVE_WINDOW_MS) {
-        s.add(t.id);
-      }
-    }
-    return s;
-  }, [visible, isLive, now]);
+  // In a live session, the most-recently-updated in-progress ticket (the current
+  // focus) always breathes, plus any in-progress ticket touched within the window
+  // (parallel work). `now` advances each poll, so when the session goes idle the
+  // heartbeat stops. See lib/active.ts for WHY a pure "updated within N min" rule
+  // is wrong here (the file-mtime touch cadence is coarse → it goes dark mid-work).
+  const activeIds = useMemo(
+    () => computeActiveIds(visible, isLive, now),
+    [visible, isLive, now],
+  );
 
   const onStripScroll = useCallback(() => {
     const el = stripRef.current;

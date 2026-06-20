@@ -3,6 +3,18 @@
 All notable changes to this project are documented here. Format mirrors content-pipeline
 (semantic-release-style): each release lists Features / Bug Fixes with PR links.
 
+## [0.4.0](https://github.com/ziyilam3999/agent-kanban/compare/v0.3.1...v0.4.0) — 2026-06-20
+
+### Features
+
+* **board:** lift & land grow on a column change — a card leaving a column grows + fades (lifts
+  off the board) and the one it lands in swells ("set down with weight") instead of a timid pop.
+  Transform/opacity only, reduced-motion-safe. (#14)
+* **board:** an "actively in progress right now" breathing heartbeat — the ticket the agent is
+  working this moment (live session + in_progress + touched within 3 min) gets a slow breathing
+  `--live` rail + a pulsing "● working" footer dot, so you can tell its current focus at a glance.
+  Distinct from the one-shot arrival glow; static cue under reduced motion. (#14)
+
 ## [0.3.1](https://github.com/ziyilam3999/agent-kanban/compare/v0.3.0...v0.3.1) — 2026-06-20
 
 ### Miscellaneous

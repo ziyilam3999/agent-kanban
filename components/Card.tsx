@@ -8,6 +8,7 @@ import {
   roleLabel,
 } from "@/lib/ui-meta";
 import { relativeTime } from "@/lib/relative-time";
+import { parseSubjectTag, subjectTagLabel } from "@/lib/subject-tag";
 
 interface CardProps {
   ticket: Ticket;
@@ -26,6 +27,9 @@ export function Card({ ticket, nowMs, glow, active, reduce }: CardProps) {
   const hue = COLUMN_HUE[ticket.column];
   const rolesSeen = new Set(ticket.comments.map((c) => c.role));
   const blocked = ticket.blockedBy.length > 0;
+  // Lift a leading "[#1063]" / "[EPIC]" prefix out of the subject so it doesn't read as a
+  // second ticket id next to the card's own #id — render it as a distinct chip instead.
+  const subjectTag = parseSubjectTag(ticket.subject);
 
   const cls = [
     "ak-card",
@@ -60,7 +64,17 @@ export function Card({ ticket, nowMs, glow, active, reduce }: CardProps) {
         </span>
       </div>
 
-      <p className="ak-card__subject">{ticket.subject}</p>
+      <p className="ak-card__subject">
+        {subjectTag.tag && (
+          <span
+            className={`ak-tag${subjectTag.isParentRef ? " ak-tag--parent" : " ak-tag--epic"}`}
+            title={subjectTag.isParentRef ? `part of ticket ${subjectTag.tag}` : subjectTag.tag}
+          >
+            {subjectTagLabel(subjectTag)}
+          </span>
+        )}
+        {subjectTag.title}
+      </p>
 
       <div className="ak-card__foot">
         {active && <span className="ak-working">working</span>}

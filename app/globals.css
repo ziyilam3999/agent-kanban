@@ -667,6 +667,29 @@ button {
   overflow: hidden;
 }
 
+/* Parent/epic chip lifted out of the subject so it doesn't read as a 2nd ticket id. */
+.ak-tag {
+  display: inline-block;
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  padding: 2px 6px;
+  margin-right: 6px;
+  border-radius: 5px;
+  vertical-align: 1px;
+  white-space: nowrap;
+  color: var(--muted, #7d8b97);
+  background: color-mix(in srgb, var(--line) 55%, transparent);
+  border: 1px solid var(--line);
+}
+.ak-tag--epic {
+  color: color-mix(in srgb, var(--live) 75%, #cfe);
+  border-color: color-mix(in srgb, var(--live) 35%, transparent);
+  background: color-mix(in srgb, var(--live) 9%, transparent);
+}
+
 .ak-card__foot {
   display: flex;
   align-items: center;

@@ -12,7 +12,8 @@ import { relativeTime } from "@/lib/relative-time";
 interface CardProps {
   ticket: Ticket;
   nowMs: number;
-  /** True for ~600ms right after this card changed column (the live glow ring). */
+  /** True for the GLOW_MS window right after this card changed column — drives
+   *  the arrival glow (ak-card--live ring/tint, or ak-card--flash for reduce). */
   glow?: boolean;
   reduce?: boolean;
 }

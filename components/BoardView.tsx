@@ -12,8 +12,8 @@ import { SessionPicker } from "./SessionPicker";
 import { Drawer } from "./Drawer";
 
 const POLL_MS = 1500;
-// Hold the moved/fresh flag for the full arrival-glow animation (ak-glow 1.4s).
-const GLOW_MS = 1500;
+// Hold the moved/fresh flag for the full arrival-glow animation (ak-glow 1.9s).
+const GLOW_MS = 2000;
 // A ticket is "actively in progress right now" (the breathing heartbeat) when
 // it sits in In Progress in a LIVE session and was touched within this window —
 // i.e. the agent's current focus, not just any in_progress card.
@@ -265,8 +265,12 @@ export function BoardView({ initial }: { initial: Board }) {
                         transition={
                           reduce
                             ? { duration: 0 }
-                            : // expo-out: strong decel, premium — not a bounce.
-                              { duration: 0.36, ease: [0.22, 1, 0.36, 1] }
+                            : // A deliberate, trackable lift — 0.7s on ease-in-out
+                              // (easeInOutCubic) so the fade is EVENLY paced across the
+                              // whole move and stays visible, not front-loaded like an
+                              // expo-out (which drops opacity in the first ~200ms and
+                              // still reads as a flick). Slow start, slow finish.
+                              { duration: 0.7, ease: [0.65, 0, 0.35, 1] }
                         }
                       >
                         <Card

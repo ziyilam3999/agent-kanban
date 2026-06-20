@@ -509,7 +509,9 @@ button {
      a border flash, and a small scale "pop". Lifted above siblings so the ring
      isn't painted under the next card. Transform/shadow/color only (no layout);
      the reduced-motion variant (.ak-card--flash) carries the static equivalent. */
-  animation: ak-glow 1.4s ease-out 1;
+  /* Slower (1.9s) + ease-in-out so the "land" is a deliberate set-down the eye
+     can follow, not a quick pop. GLOW_MS must hold the flag for the full run. */
+  animation: ak-glow 1.9s ease-in-out 1;
   z-index: 1;
 }
 
@@ -520,15 +522,15 @@ button {
     background: color-mix(in srgb, var(--live) 18%, var(--panel));
     transform: scale(1);
   }
-  14% {
-    /* "Set down with weight" — the card swells as it lands, synced to the halo
-       peak. A clear grow (1.07), then ease back: deliberate, not a bouncy dip. */
+  26% {
+    /* "Set down with weight" — a SLOW swell to the peak (~0.5s rise), then ease
+       back: deliberate and trackable, not a bouncy dip. */
     box-shadow: 0 0 0 5px color-mix(in srgb, var(--live) 55%, transparent);
     border-color: var(--live);
     background: color-mix(in srgb, var(--live) 18%, var(--panel));
     transform: scale(1.07);
   }
-  50% {
+  60% {
     border-color: var(--live);
     background: color-mix(in srgb, var(--live) 10%, var(--panel));
     transform: scale(1);

@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. Format mirrors content-pipeline
 (semantic-release-style): each release lists Features / Bug Fixes with PR links.
 
+## [0.3.1](https://github.com/ziyilam3999/agent-kanban/compare/v0.3.0...v0.3.1) — 2026-06-20
+
+### Miscellaneous
+
+* **ci(live):** auto-sync the login-gated `live` Vercel preview on every master push. The
+  live board renders real data from the `live` branch (a Preview-only env), which only
+  rebuilds on a push there — so it silently lagged every release (it sat on v0.2.1 while
+  master shipped v0.3.0). A new `sync-live` workflow merges master into `live` (`--no-ff`)
+  and pushes, so the live board is never behind a release again. (#12)
+
 ## [0.3.0](https://github.com/ziyilam3999/agent-kanban/compare/v0.2.2...v0.3.0) — 2026-06-20
 
 ### Features

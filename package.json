@@ -1,6 +1,6 @@
 {
   "name": "agent-kanban",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "Universal live Kanban board — operator visibility into agent / 3-role-model work. Local files are the source of truth; the web board is a synced, login-gated view.",
   "scripts": {

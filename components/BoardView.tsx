@@ -12,7 +12,8 @@ import { SessionPicker } from "./SessionPicker";
 import { Drawer } from "./Drawer";
 
 const POLL_MS = 1500;
-const GLOW_MS = 700;
+// Hold the moved/fresh flag for the full arrival-glow animation (ak-glow 1.4s).
+const GLOW_MS = 1500;
 
 /**
  * Tickets visible for the selected session. Tickets carry an 8-char `sessionId`

@@ -504,22 +504,46 @@ button {
 }
 
 .ak-card--live {
-  animation: ak-glow 0.6s ease-out 1;
+  /* Arrival glow: a card that just changed column lands with a clearly
+     readable pulse — a colored ring that holds then fades, a brief fill tint,
+     a border flash, and a small scale "pop". Lifted above siblings so the ring
+     isn't painted under the next card. Transform/shadow/color only (no layout);
+     the reduced-motion variant (.ak-card--flash) carries the static equivalent. */
+  animation: ak-glow 1.4s ease-out 1;
+  z-index: 1;
 }
 
 @keyframes ak-glow {
   0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--live) 75%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--live) 90%, transparent);
     border-color: var(--live);
+    background: color-mix(in srgb, var(--live) 18%, var(--panel));
+    transform: scale(1);
+  }
+  16% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--live) 55%, transparent);
+    border-color: var(--live);
+    background: color-mix(in srgb, var(--live) 18%, var(--panel));
+    transform: scale(1.03);
+  }
+  55% {
+    border-color: var(--live);
+    background: color-mix(in srgb, var(--live) 10%, var(--panel));
+    transform: scale(1);
   }
   100% {
-    box-shadow: 0 0 0 6px transparent;
+    box-shadow: 0 0 0 9px transparent;
     border-color: var(--line);
+    background: var(--panel);
+    transform: scale(1);
   }
 }
 
+/* Reduced-motion arrival cue: no animation, but still a clear static highlight
+   (border + fill tint) held for the GLOW_MS window so the landing is visible. */
 .ak-card--flash {
   border-color: var(--live);
+  background: color-mix(in srgb, var(--live) 14%, var(--panel));
 }
 
 .ak-card__top {

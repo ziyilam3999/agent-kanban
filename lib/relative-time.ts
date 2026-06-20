@@ -21,3 +21,23 @@ export function relativeTime(ms: number, nowMs: number): string {
   if (days === 1) return "yesterday";
   return `${days}d ago`;
 }
+
+/**
+ * Compact elapsed gap between two adjacent ISO timestamps, e.g. "+15m". Returns null when the gap
+ * carries no signal or is unknown:
+ *   unparseable / negative → null
+ *   < 1 s (near-simultaneous, e.g. a retroactively batch-logged ledger) → null (no noisy "+0s")
+ *   < 60 s → "+Ns"   · < 60 min → "+Nm"   · < 24 h → "+Nh"   · ≥ 24 h → "+Nd"
+ */
+export function elapsedGap(prevIso: string, iso: string): string | null {
+  const d = Date.parse(iso) - Date.parse(prevIso);
+  if (!Number.isFinite(d) || d < 0) return null;
+  if (d < 1000) return null;
+  const s = Math.floor(d / 1000);
+  if (s < 60) return `+${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `+${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `+${h}h`;
+  return `+${Math.floor(h / 24)}d`;
+}

@@ -520,13 +520,15 @@ button {
     background: color-mix(in srgb, var(--live) 18%, var(--panel));
     transform: scale(1);
   }
-  16% {
+  14% {
+    /* "Set down with weight" — the card swells as it lands, synced to the halo
+       peak. A clear grow (1.07), then ease back: deliberate, not a bouncy dip. */
     box-shadow: 0 0 0 5px color-mix(in srgb, var(--live) 55%, transparent);
     border-color: var(--live);
     background: color-mix(in srgb, var(--live) 18%, var(--panel));
-    transform: scale(1.03);
+    transform: scale(1.07);
   }
-  55% {
+  50% {
     border-color: var(--live);
     background: color-mix(in srgb, var(--live) 10%, var(--panel));
     transform: scale(1);

@@ -239,12 +239,15 @@ export function BoardView({ initial }: { initial: Board }) {
                         exit={
                           reduce
                             ? { opacity: 0 }
-                            : { opacity: 0, scale: 0.97 }
+                            : // "Lift" — a card leaving a column GROWS + fades
+                              // (lifted off the board), not shrinks-away.
+                              { opacity: 0, scale: 1.06 }
                         }
                         transition={
                           reduce
                             ? { duration: 0 }
-                            : { duration: 0.32, ease: "easeOut" }
+                            : // expo-out: strong decel, premium — not a bounce.
+                              { duration: 0.36, ease: [0.22, 1, 0.36, 1] }
                         }
                       >
                         <Card

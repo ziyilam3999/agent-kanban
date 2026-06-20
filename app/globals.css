@@ -520,13 +520,15 @@ button {
     background: color-mix(in srgb, var(--live) 18%, var(--panel));
     transform: scale(1);
   }
-  16% {
+  14% {
+    /* "Set down with weight" — the card swells as it lands, synced to the halo
+       peak. A clear grow (1.07), then ease back: deliberate, not a bouncy dip. */
     box-shadow: 0 0 0 5px color-mix(in srgb, var(--live) 55%, transparent);
     border-color: var(--live);
     background: color-mix(in srgb, var(--live) 18%, var(--panel));
-    transform: scale(1.03);
+    transform: scale(1.07);
   }
-  55% {
+  50% {
     border-color: var(--live);
     background: color-mix(in srgb, var(--live) 10%, var(--panel));
     transform: scale(1);
@@ -544,6 +546,75 @@ button {
 .ak-card--flash {
   border-color: var(--live);
   background: color-mix(in srgb, var(--live) 14%, var(--panel));
+}
+
+/* "Actively in progress right now" — a calm, continuous HEARTBEAT on the ticket
+   the agent is working this moment (live session + in_progress + touched within
+   ACTIVE_WINDOW). Unlike the one-shot arrival glow this PERSISTS and is gentle.
+   It lives on the rail (the card's spine) + a "working" pulse dot — NOT on the
+   card's own box-shadow — so it never collides with .ak-card--live's halo, and a
+   just-arrived active card can play the halo once then settle into breathing. */
+.ak-card--active .ak-card__rail {
+  background: var(--live);
+  animation: ak-rail-breathe 3.4s ease-in-out infinite;
+}
+@keyframes ak-rail-breathe {
+  0%,
+  100% {
+    opacity: 0.5;
+    box-shadow: 0 0 5px 0 color-mix(in srgb, var(--live) 30%, transparent);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 12px 1px color-mix(in srgb, var(--live) 60%, transparent);
+  }
+}
+
+/* The "● working" marker in the active card's footer — a pulsing live dot. */
+.ak-working {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--live);
+}
+.ak-working::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--live);
+  box-shadow: 0 0 6px var(--live);
+  animation: ak-working-pulse 1.7s ease-in-out infinite;
+}
+@keyframes ak-working-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+/* Reduced motion: kill the pulse/breath but keep an unmistakable static "active"
+   cue — a solid bright rail and a steady dot. */
+@media (prefers-reduced-motion: reduce) {
+  .ak-card--active .ak-card__rail {
+    animation: none;
+    opacity: 1;
+  }
+  .ak-working::before {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .ak-card__top {

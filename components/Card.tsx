@@ -15,11 +15,14 @@ interface CardProps {
   /** True for the GLOW_MS window right after this card changed column — drives
    *  the arrival glow (ak-card--live ring/tint, or ak-card--flash for reduce). */
   glow?: boolean;
+  /** True while this ticket is the agent's CURRENT focus (live session +
+   *  in_progress + touched recently) — drives the persistent "working" heartbeat. */
+  active?: boolean;
   reduce?: boolean;
 }
 
 /** Telemetry tile — left hue rail, id + role pips, clamped subject, blocked/time footer. */
-export function Card({ ticket, nowMs, glow, reduce }: CardProps) {
+export function Card({ ticket, nowMs, glow, active, reduce }: CardProps) {
   const hue = COLUMN_HUE[ticket.column];
   const rolesSeen = new Set(ticket.comments.map((c) => c.role));
   const blocked = ticket.blockedBy.length > 0;
@@ -27,6 +30,7 @@ export function Card({ ticket, nowMs, glow, reduce }: CardProps) {
   const cls = [
     "ak-card",
     glow ? (reduce ? "ak-card--flash" : "ak-card--live") : "",
+    active ? "ak-card--active" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -59,6 +63,7 @@ export function Card({ ticket, nowMs, glow, reduce }: CardProps) {
       <p className="ak-card__subject">{ticket.subject}</p>
 
       <div className="ak-card__foot">
+        {active && <span className="ak-working">working</span>}
         {blocked && (
           <span className="ak-blocked">
             ⛔ blocked by #{ticket.blockedBy.join(", #")}

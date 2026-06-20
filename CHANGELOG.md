@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. Format mirrors content-pipeline
 (semantic-release-style): each release lists Features / Bug Fixes with PR links.
 
+## [0.4.1](https://github.com/ziyilam3999/agent-kanban/compare/v0.4.0...v0.4.1) — 2026-06-20
+
+### Bug Fixes
+
+* **board:** slow the lift & land column-change movement so it's clearly noticeable. The exit/lift +
+  reflow goes 0.36s → 0.7s on ease-in-out (was a front-loaded expo-out that still read as a flick),
+  and the arrival "land" swell goes 1.4s → 1.9s with a slower rise — a deliberate pick-up → set-down
+  the eye can follow. Transform/opacity only, reduced-motion-safe. (#16)
+
 ## [0.4.0](https://github.com/ziyilam3999/agent-kanban/compare/v0.3.1...v0.4.0) — 2026-06-20
 
 ### Features

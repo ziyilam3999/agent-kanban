@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. Format mirrors content-pipeline
 (semantic-release-style): each release lists Features / Bug Fixes with PR links.
 
+## [0.4.2](https://github.com/ziyilam3999/agent-kanban/compare/v0.4.1...v0.4.2) — 2026-06-20
+
+### Bug Fixes
+
+* **board:** keep the "actively in progress" heartbeat lit through sustained work. The breathing
+  "● working" dot keyed off the ticket's file-mtime being within 3 min, but an agent works a ticket
+  for many minutes while touching its file only at discrete events — so the indicator went dark
+  mid-work. Now, in a live session, the most-recently-updated in-progress ticket (the current focus)
+  always breathes, with a widened window for genuine parallel work. (#18)
+
 ## [0.4.1](https://github.com/ziyilam3999/agent-kanban/compare/v0.4.0...v0.4.1) — 2026-06-20
 
 ### Bug Fixes

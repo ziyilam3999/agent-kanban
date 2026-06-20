@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. Format mirrors content-pipeline
 (semantic-release-style): each release lists Features / Bug Fixes with PR links.
 
+## [0.4.3](https://github.com/ziyilam3999/agent-kanban/compare/v0.4.2...v0.4.3) — 2026-06-20
+
+### Bug Fixes
+
+* **board:** render a card's `[#parent]` / `[EPIC]` subject prefix as a distinct chip instead of inline
+  title text. Sub-tasks carry their parent epic as a `[#1063]` prefix in the subject, which double-rendered
+  next to the card's own `#id` — two ticket-number-looking tokens, ambiguous which is the ticket. Now the
+  prefix is lifted into a small chip (`↳ #1063` for a parent ref, `EPIC` otherwise) and the title is cleaned. (#20)
+
 ## [0.4.2](https://github.com/ziyilam3999/agent-kanban/compare/v0.4.1...v0.4.2) — 2026-06-20
 
 ### Bug Fixes

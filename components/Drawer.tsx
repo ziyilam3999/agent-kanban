@@ -14,6 +14,7 @@ import {
   PIPELINE_ROLES,
   roleColor,
   roleLabel,
+  verdictHue,
 } from "@/lib/ui-meta";
 import { relativeTime, elapsedGap } from "@/lib/relative-time";
 
@@ -32,24 +33,6 @@ function localClock(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-/**
- * CSS hue for a review verdict pill, by precedence (most severe first):
- *   BLOCK / FAIL / REJECT                 → red   (--err)
- *   NOTES / WITH-FIX(ES) / WARN           → amber (--review)
- *   APPROVE / PASS / SHIP (without FIX)   → green (--done)
- *   otherwise                              → dim
- * Case-insensitive. A qualified verdict (e.g. APPROVE-WITH-NOTES, SHIP-WITH-FIXES)
- * resolves AMBER because the amber check precedes the green one.
- */
-function verdictHue(v: string): string {
-  const u = v.toUpperCase();
-  if (/BLOCK|FAIL|REJECT/.test(u)) return "var(--err)";
-  if (/NOTES|WITH-FIX|FIXES|WARN/.test(u)) return "var(--review)";
-  if (/APPROVE|PASS/.test(u)) return "var(--done)";
-  if (/SHIP/.test(u) && !/FIX/.test(u)) return "var(--done)";
-  return "var(--fg-dim)";
 }
 
 /** Bottom-sheet (mobile) / side panel (desktop) showing one ticket's black-box log. */

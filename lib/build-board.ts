@@ -18,6 +18,10 @@ import type {
   SessionSummary,
   Ticket,
 } from "./board-schema";
+import { PIPELINE_ROLES } from "./ui-meta";
+
+/** The canonical pipeline roles as a set (orchestrator is NOT a member). */
+const PIPELINE_ROLE_SET = new Set<string>(PIPELINE_ROLES);
 
 /** Default "live" window — a session is live if its last activity is within this. */
 export const LIVE_WINDOW_MS = 5 * 60 * 1000;
@@ -135,16 +139,21 @@ export function basenameOf(p: string): string {
 }
 
 /**
- * Map a raw task status (+ whether the ledger carries an execution-review) to a
- * display Column:
+ * Map a raw task status (+ derived ledger signals) to a display Column:
  *   completed                                  → done
  *   in_progress + execution-review in ledger   → in_review
  *   in_progress otherwise                       → in_progress
- *   pending                                     → todo
+ *   pending + a pipeline-role comment           → in_progress (already started)
+ *   pending otherwise                           → todo
+ *
+ * `hasPipelineRoleComment` is TRUE iff the ledger carries ≥1 comment whose role is a
+ * PIPELINE_ROLES member (planner / plan-review / executor / execution-review).
+ * orchestrator is EXCLUDED, so an orchestrator-only pending task stays in todo.
  */
 export function toColumn(
   status: RawTask["status"],
-  hasExecutionReview: boolean
+  hasExecutionReview: boolean,
+  hasPipelineRoleComment = false
 ): Column {
   switch (status) {
     case "completed":
@@ -153,7 +162,7 @@ export function toColumn(
       return hasExecutionReview ? "in_review" : "in_progress";
     case "pending":
     default:
-      return "todo";
+      return hasPipelineRoleComment ? "in_progress" : "todo";
   }
 }
 
@@ -207,12 +216,17 @@ export function buildTicket(
   const hasExecutionReview = ledgerLines.some(
     (l) => l.role === "execution-review"
   );
+  // TRUE iff any ledger comment is from a pipeline role (orchestrator excluded) —
+  // lets a pending task that a role has already started surface as in_progress.
+  const hasPipelineRoleComment = ledgerLines.some((l) =>
+    PIPELINE_ROLE_SET.has(l.role)
+  );
 
   const ticket: Ticket = {
     id: rawTask.id,
     subject: rawTask.subject,
     description: redact(rawTask.description ?? ""),
-    column: toColumn(rawTask.status, hasExecutionReview),
+    column: toColumn(rawTask.status, hasExecutionReview, hasPipelineRoleComment),
     status: rawTask.status,
     blockedBy: rawTask.blockedBy ?? [],
     comments,

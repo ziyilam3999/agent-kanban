@@ -6,4 +6,9 @@ module.exports = {
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/$1",
   },
+  // Card.tsx render tests import a .tsx component; ts-jest needs the JSX transform
+  // enabled to compile it (the default tsconfig used by the preset does not emit JSX).
+  transform: {
+    "^.+\\.tsx?$": ["ts-jest", { tsconfig: { jsx: "react-jsx" } }],
+  },
 };

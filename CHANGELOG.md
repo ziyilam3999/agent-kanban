@@ -1,3 +1,9 @@
+## [0.6.0](https://github.com/ziyilam3999/agent-kanban/compare/v0.5.0...v0.6.0) (2026-06-21)
+
+### Features
+
+* **board:** #1110 — phase line on every card (QUEUED / ▶ ROLE / ◆ REVIEW · VERDICT / ✓ DONE · VERDICT) so each card explains its lane at a glance; verdict surfaced on the card face; toColumn derives in_progress from ledger activity (#24)
+
 ## [0.5.0](https://github.com/ziyilam3999/agent-kanban/compare/v0.4.3...v0.5.0) (2026-06-21)
 
 ### Features

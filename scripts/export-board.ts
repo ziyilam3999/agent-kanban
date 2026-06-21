@@ -58,17 +58,52 @@ interface SessionInfo {
   lastActiveMs: number;
 }
 
-function collectSessions(): SessionInfo[] {
+/**
+ * Fold the newest 3-role ledger mtime for a session into `seed` (returning the
+ * max). A long pipeline stretch (planner→…→execution-review, 20-40 min) bumps
+ * ONLY the ledger files at `<ledgerDir>/<sessionId>/*.jsonl` (each `3role-ledger
+ * append`), NOT the task files — so without this the task-file-only mtime goes
+ * stale mid-work, the session reads not-live, no ticket breathes, and the board
+ * shows IDLE while the agent is actively working (#1121). Fully guarded: a
+ * missing ledger dir / unreadable file never throws — it falls back to `seed`.
+ */
+function newestLedgerMtimeMs(
+  ledgerDir: string,
+  sessionId: string,
+  seed: number
+): number {
+  let newest = seed;
+  try {
+    const sessionLedgerDir = path.join(ledgerDir, sessionId);
+    for (const f of fs.readdirSync(sessionLedgerDir)) {
+      if (!f.endsWith(".jsonl")) continue;
+      try {
+        const st = fs.statSync(path.join(sessionLedgerDir, f));
+        if (st.isFile() && st.mtimeMs > newest) newest = st.mtimeMs;
+      } catch {
+        /* ignore unreadable ledger file */
+      }
+    }
+  } catch {
+    /* no ledger dir for this session — fall back to the task-file mtime */
+  }
+  return newest;
+}
+
+export function collectSessions(
+  tasksDir: string = TASKS_DIR,
+  ledgerDir: string = LEDGER_DIR
+): SessionInfo[] {
   let dirs: string[] = [];
   try {
-    dirs = fs.readdirSync(TASKS_DIR);
+    dirs = fs.readdirSync(tasksDir);
   } catch {
     return [];
   }
   const out: SessionInfo[] = [];
   for (const name of dirs) {
     if (isExcludedName(name)) continue;
-    const dir = path.join(TASKS_DIR, name);
+    const dir = path.join(tasksDir, name);
     try {
       if (!fs.statSync(dir).isDirectory()) continue;
     } catch {
@@ -85,9 +120,12 @@ function collectSessions(): SessionInfo[] {
         /* ignore unreadable */
       }
     }
+    // Fold in the session's newest 3-role ledger mtime so a long pipeline
+    // stretch (ledger-only activity) keeps the session live (#1121).
+    lastActiveMs = newestLedgerMtimeMs(ledgerDir, name, lastActiveMs);
     out.push({ sessionId: name, dir, taskFiles, lastActiveMs });
   }
-  // newest-first by last activity
+  // newest-first by last activity (now reflects true activity incl. ledger).
   out.sort((a, b) => b.lastActiveMs - a.lastActiveMs);
   return out;
 }
@@ -186,4 +224,9 @@ function main(): void {
   );
 }
 
-main();
+// Run the exporter only when invoked as a script — NOT when imported by a unit
+// test (jest sets NODE_ENV=test). Importing the module to exercise
+// collectSessions must not read the real stores or write data/board.json.
+if (process.env.NODE_ENV !== "test") {
+  main();
+}

@@ -1,7 +1,15 @@
-// build-board.ts — PURE board-assembly logic. NO filesystem access lives here.
-// The IO wrapper (scripts/export-board.ts) reads the local stores and feeds
-// already-parsed inputs into these deterministic functions. Keeping this layer
-// pure is what makes the whole exporter unit-testable.
+// build-board.ts — board-assembly logic. The IO wrapper (scripts/export-board.ts)
+// reads the local stores and feeds already-parsed inputs into these deterministic
+// functions, which is what makes the whole exporter unit-testable.
+//
+// ONE narrow filesystem exception lives here: the verdict-from-artifact FALLBACK
+// in toComment(). When a review-role ledger line carries no `verdict` field but
+// DOES have an artifact_path, we best-effort read the artifact and lift its
+// `Decision:` token onto the comment. The read is fully guarded (try/catch,
+// 64KB cap) so a missing/unreadable/huge file never throws — it just yields no
+// verdict. The token-extraction itself (extractDecisionVerdict) stays PURE.
+
+import { closeSync, openSync, readSync } from "fs";
 
 import type {
   Board,
@@ -40,6 +48,51 @@ export interface RawLedgerLine {
 
 /** Max characters kept for a verdict pill — long verdicts are truncated. */
 export const VERDICT_MAX_LEN = 24;
+
+/** Roles whose artifact may carry a `Decision:` verdict when the ledger omits one. */
+const REVIEW_ROLES = new Set(["plan-review", "execution-review"]);
+
+/** Only scan the first 64KB of a review artifact — never slurp a huge file. */
+const ARTIFACT_READ_CAP_BYTES = 64 * 1024;
+
+/** Recognised verdict tokens written as a `Decision: <token>` line in an artifact. */
+const DECISION_RE =
+  /Decision:\s*(PASS|FAIL|REVISE|APPROVE|BLOCK|SHIP-WITH-FIXES)/i;
+
+/**
+ * PURE: extract the first `Decision: <token>` verdict from arbitrary text.
+ * Case-insensitive on the token; returns the matched token (original casing)
+ * or undefined when no Decision line is present. No filesystem access.
+ */
+export function extractDecisionVerdict(text: string): string | undefined {
+  if (typeof text !== "string") return undefined;
+  const m = DECISION_RE.exec(text);
+  return m ? m[1] : undefined;
+}
+
+/**
+ * Best-effort read of the first ARTIFACT_READ_CAP_BYTES of a file. Fully guarded:
+ * a missing / unreadable / permission-denied path yields undefined, never throws.
+ */
+function readArtifactHead(path: string): string | undefined {
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, "r");
+    const buf = Buffer.alloc(ARTIFACT_READ_CAP_BYTES);
+    const bytes = readSync(fd, buf, 0, ARTIFACT_READ_CAP_BYTES, 0);
+    return buf.toString("utf8", 0, bytes);
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        /* ignore close failure — best-effort */
+      }
+    }
+  }
+}
 
 // Home-path patterns. NO hardcoded username — every <name> segment is a wildcard.
 // Matched up to (but not including) the next path separator or whitespace.
@@ -110,10 +163,30 @@ function toComment(line: RawLedgerLine): LedgerComment {
   if (line.agentId) c.agentId = line.agentId;
   if (line.artifact_path) c.artifact = redact(basenameOf(line.artifact_path));
   if (line.skip_reason) c.skipReason = line.skip_reason;
+
+  // PRIMARY: an explicit verdict recorded on the ledger line.
   if (typeof line.verdict === "string") {
     const v = redact(line.verdict.trim()).slice(0, VERDICT_MAX_LEN);
     if (v) c.verdict = v;
   }
+
+  // FALLBACK: review-role line with no ledger verdict but a readable artifact
+  // carrying a `Decision: <token>` line (e.g. a review recorded without
+  // --verdict). Best-effort + safe — never throws, never crashes board build.
+  if (
+    !c.verdict &&
+    REVIEW_ROLES.has(line.role) &&
+    typeof line.artifact_path === "string" &&
+    line.artifact_path.length > 0
+  ) {
+    const text = readArtifactHead(line.artifact_path);
+    const decision = text ? extractDecisionVerdict(text) : undefined;
+    if (decision) {
+      const v = redact(decision.trim()).slice(0, VERDICT_MAX_LEN);
+      if (v) c.verdict = v;
+    }
+  }
+
   return c;
 }
 

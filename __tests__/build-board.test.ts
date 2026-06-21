@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import {
   redact,
   basenameOf,
@@ -5,6 +8,7 @@ import {
   buildTicket,
   buildSessionSummary,
   buildBoard,
+  extractDecisionVerdict,
   VERDICT_MAX_LEN,
   type RawTask,
   type RawLedgerLine,
@@ -223,6 +227,123 @@ describe("buildTicket — verdict pass-through (seam B read side)", () => {
     );
     expect(t.comments[0].verdict).toHaveLength(VERDICT_MAX_LEN);
     expect(long.startsWith(t.comments[0].verdict as string)).toBe(true);
+  });
+});
+
+describe("extractDecisionVerdict (pure)", () => {
+  it("extracts the first Decision token", () => {
+    expect(
+      extractDecisionVerdict("preamble\nDecision: REVISE\nmore notes")
+    ).toBe("REVISE");
+  });
+
+  it("is case-insensitive on the Decision keyword and matches PASS", () => {
+    expect(extractDecisionVerdict("...\ndecision: PASS\n...")).toBe("PASS");
+  });
+
+  it("returns undefined when no Decision line is present", () => {
+    expect(extractDecisionVerdict("no decision here")).toBeUndefined();
+  });
+});
+
+describe("buildTicket — verdict-from-artifact fallback (seam B, no --verdict)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "akb-verdict-"));
+
+  const writeArtifact = (name: string, body: string): string => {
+    const p = join(dir, name);
+    writeFileSync(p, body, "utf8");
+    return p;
+  };
+
+  it("CASE 1 — primary ledger verdict still wins (unchanged path)", () => {
+    const t = buildTicket(
+      baseTask(),
+      [
+        {
+          role: "plan-review",
+          ts: "2026-06-21T04:58:26.116Z",
+          verdict: "PASS",
+        },
+      ],
+      1
+    );
+    expect(t.comments[0].verdict).toBe("PASS");
+  });
+
+  it("CASE 2 — review line with NO verdict derives PASS from the artifact Decision line", () => {
+    const artifact = writeArtifact(
+      "review-pass.md",
+      "# Execution review\n\nLooks good.\n\nDecision: PASS\n"
+    );
+    const t = buildTicket(
+      baseTask(),
+      [
+        {
+          role: "execution-review",
+          ts: "2026-06-21T05:27:46.211Z",
+          artifact_path: artifact,
+        },
+      ],
+      1
+    );
+    expect(t.comments[0].verdict).toBe("PASS");
+  });
+
+  it("CASE 4 — a NON-review role does NOT derive a verdict from its artifact", () => {
+    const artifact = writeArtifact(
+      "executor-note.md",
+      "Implemented the thing.\nDecision: PASS\n"
+    );
+    const t = buildTicket(
+      baseTask(),
+      [
+        {
+          role: "executor",
+          ts: "2026-06-21T05:15:36.461Z",
+          artifact_path: artifact,
+        },
+      ],
+      1
+    );
+    expect(t.comments[0].verdict).toBeUndefined();
+  });
+
+  it("CASE 5 — an unreadable / missing artifact path yields no verdict and never throws", () => {
+    const missing = join(dir, "does-not-exist-xyz.md");
+    expect(() =>
+      buildTicket(
+        baseTask(),
+        [
+          {
+            role: "execution-review",
+            ts: "2026-06-21T05:27:46.211Z",
+            artifact_path: missing,
+          },
+        ],
+        1
+      )
+    ).not.toThrow();
+    const t = buildTicket(
+      baseTask(),
+      [
+        {
+          role: "execution-review",
+          ts: "2026-06-21T05:27:46.211Z",
+          artifact_path: missing,
+        },
+      ],
+      1
+    );
+    expect(t.comments[0].verdict).toBeUndefined();
+  });
+
+  it("review line with neither verdict nor artifact_path stays verdict-less", () => {
+    const t = buildTicket(
+      baseTask(),
+      [{ role: "plan-review", ts: "2026-06-21T04:58:26.116Z" }],
+      1
+    );
+    expect(t.comments[0].verdict).toBeUndefined();
   });
 });
 

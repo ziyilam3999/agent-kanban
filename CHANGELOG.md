@@ -1,3 +1,9 @@
+## [0.7.1](https://github.com/ziyilam3999/agent-kanban/compare/v0.7.0...v0.7.1) (2026-06-21)
+
+### Bug Fixes
+
+* **board:** #1121 session liveness folds 3-role ledger mtimes into lastActiveMs so the board no longer reads idle during a long 3-role stretch (a TaskUpdate only fires at task start/finish; mid-pipeline activity is ledger appends) (#28)
+
 ## [0.7.0](https://github.com/ziyilam3999/agent-kanban/compare/v0.6.0...v0.7.0) (2026-06-21)
 
 ### Features

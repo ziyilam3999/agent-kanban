@@ -26,7 +26,7 @@ interface CardProps {
 /** Telemetry tile — left hue rail, id + role pips, clamped subject, blocked/time footer. */
 export function Card({ ticket, nowMs, glow, active, reduce }: CardProps) {
   const hue = COLUMN_HUE[ticket.column];
-  const phase = phaseLine(ticket);
+  const phase = phaseLine(ticket, active);
   const rolesSeen = new Set(ticket.comments.map((c) => c.role));
   const blocked = ticket.blockedBy.length > 0;
   // Lift a leading "[#1063]" / "[EPIC]" prefix out of the subject so it doesn't read as a
@@ -67,7 +67,7 @@ export function Card({ ticket, nowMs, glow, active, reduce }: CardProps) {
       </div>
 
       <p
-        className="ak-phase"
+        className={`ak-phase${active ? " ak-phase--live" : ""}`}
         style={{ ["--phase" as string]: phase.hueVar }}
         aria-label={phase.ariaLabel}
       >
@@ -87,7 +87,6 @@ export function Card({ ticket, nowMs, glow, active, reduce }: CardProps) {
       </p>
 
       <div className="ak-card__foot">
-        {active && <span className="ak-working">working</span>}
         {blocked && (
           <span className="ak-blocked">
             ⛔ blocked by #{ticket.blockedBy.join(", #")}

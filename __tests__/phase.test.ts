@@ -47,11 +47,23 @@ describe("phaseLine", () => {
     expect(p.text).not.toContain("EXECUTOR");
   });
 
-  it("in_progress with no work-role comment → ▶ WORKING fallback", () => {
+  it("in_progress, no work-role, 1-arg (active defaults false) → ▶ STARTED (cyan)", () => {
     const p = phaseLine(
       ticket("in_progress", [{ role: "orchestrator", ts: at(1) }])
     );
+    expect(p.text).toBe("▶ STARTED");
+    expect(p.hueVar).toBe("var(--prog)");
+    expect(p.ariaLabel).toContain("started");
+  });
+
+  it("in_progress, no work-role, active=true → ▶ WORKING (mint --live)", () => {
+    const p = phaseLine(
+      ticket("in_progress", [{ role: "orchestrator", ts: at(1) }]),
+      true
+    );
     expect(p.text).toBe("▶ WORKING");
+    expect(p.hueVar).toBe("var(--live)");
+    expect(p.ariaLabel).toContain("working now");
   });
 
   it("in_review with an execution-review PASS → ◆ REVIEW · PASS", () => {

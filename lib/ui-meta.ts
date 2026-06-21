@@ -105,11 +105,16 @@ export interface PhaseLine {
  * Build the per-card phase line that states WHY a ticket sits in its lane, in plain
  * words + a hue token. Branches on `ticket.column`; every branch returns NON-EMPTY text.
  *   todo        → "QUEUED"
- *   in_progress → "▶ <ROLE>" of the latest work role (planner/executor), else "▶ WORKING"
+ *   in_progress → "▶ <ROLE>" of the latest work role (planner/executor); else
+ *                 "▶ WORKING" (mint) when `active`, "▶ STARTED" (cyan) when not
  *   in_review   → "◆ REVIEW · <VERDICT>" (hue by verdict severity), else "◆ REVIEW"
  *   done        → "✓ DONE" plus " · <VERDICT>" when a review verdict exists
+ *
+ * `active` (default false) marks the single in_progress ticket the live session is
+ * working RIGHT NOW (or a parallel-touched card) — it distinguishes the live focus
+ * (▶ WORKING, mint, pulsing) from a begun-but-parked card (▶ STARTED, cyan, static).
  */
-export function phaseLine(ticket: Ticket): PhaseLine {
+export function phaseLine(ticket: Ticket, active = false): PhaseLine {
   switch (ticket.column) {
     case "todo":
       return {
@@ -123,11 +128,17 @@ export function phaseLine(ticket: Ticket): PhaseLine {
         if (WORK_PIPELINE_ROLES.has(c.role)) role = c.role;
       }
       if (!role) {
-        return {
-          text: "▶ WORKING",
-          hueVar: roleColor("executor"),
-          ariaLabel: "in progress, working",
-        };
+        return active
+          ? {
+              text: "▶ WORKING",
+              hueVar: "var(--live)",
+              ariaLabel: "in progress, working now",
+            }
+          : {
+              text: "▶ STARTED",
+              hueVar: "var(--prog)",
+              ariaLabel: "in progress, started",
+            };
       }
       return {
         text: `▶ ${roleLabel(role)}`,

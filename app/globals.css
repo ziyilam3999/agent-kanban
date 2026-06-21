@@ -572,26 +572,14 @@ button {
   }
 }
 
-/* The "● working" marker in the active card's footer — a pulsing live dot. */
-.ak-working {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--live);
-}
-.ak-working::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--live);
-  box-shadow: 0 0 6px var(--live);
+/* The live phase line on the card the agent is working RIGHT NOW (▶ WORKING,
+   mint). A gentle glyph pulse + glow — the single live status word, reusing the
+   existing ak-working-pulse keyframe (no new animation). The breathing left rail
+   carries the other ambient "alive" cue; this is the honest status word. */
+.ak-phase--live {
+  text-shadow: 0 0 8px color-mix(in srgb, var(--live) 55%, transparent);
   animation: ak-working-pulse 1.7s ease-in-out infinite;
+  transform-origin: left center;
 }
 @keyframes ak-working-pulse {
   0%,
@@ -612,7 +600,7 @@ button {
     animation: none;
     opacity: 1;
   }
-  .ak-working::before {
+  .ak-phase--live {
     animation: none;
     opacity: 1;
     transform: none;

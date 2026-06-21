@@ -17,8 +17,8 @@ const ticket = (
   updatedAt: 1,
 });
 
-const render = (t: Ticket) =>
-  renderToStaticMarkup(createElement(Card, { ticket: t, nowMs: 2 }));
+const render = (t: Ticket, active = false) =>
+  renderToStaticMarkup(createElement(Card, { ticket: t, nowMs: 2, active }));
 
 describe("Card phase line render", () => {
   it("in_review + PASS card → markup carries REVIEW and PASS", () => {
@@ -48,5 +48,27 @@ describe("Card phase line render", () => {
     );
     expect(markup).toContain("EXECUTOR");
     expect(markup).toContain("ak-phase");
+  });
+
+  it("ACTIVE no-role in_progress card → WORKING + ak-phase--live, one live signal (no footer working node)", () => {
+    const markup = render(
+      ticket("in_progress", [{ role: "orchestrator", ts: "2026-06-21T01:00:00.000Z" }]),
+      true
+    );
+    expect(markup).toContain("WORKING");
+    expect(markup).toContain("ak-phase--live");
+    // Dedupe: the live word lives ONLY on the phase line — no second footer
+    // "working" node (RED on master, which renders both).
+    expect(markup).not.toContain("ak-working");
+    expect(markup).not.toContain(">working<");
+  });
+
+  it("NOT-active no-role in_progress card → STARTED, no ak-phase--live pulse", () => {
+    const markup = render(
+      ticket("in_progress", [{ role: "orchestrator", ts: "2026-06-21T01:00:00.000Z" }])
+    );
+    expect(markup).toContain("STARTED");
+    expect(markup).not.toContain("ak-phase--live");
+    expect(markup).not.toContain("ak-working");
   });
 });

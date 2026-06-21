@@ -70,7 +70,10 @@ describe("collectSessions — #1121 ledger mtimes keep a 3-role stretch live", (
 
     // The CORE assertion that is RED on master (master uses task-file mtime only,
     // so lastActiveMs would be the stale 30-min-old value → not live).
-    expect(s.lastActiveMs).toBe(ledgerMtime);
+    // Tolerance, not exact-equality: utimesSync sets mtime in SECONDS and the
+    // readback mtimeMs drifts sub-second across filesystems (APFS local vs ext4
+    // in CI), so assert lastActiveMs tracks the FRESH ledger mtime within 1s.
+    expect(Math.abs(s.lastActiveMs - ledgerMtime)).toBeLessThan(1000);
     expect(s.lastActiveMs).toBeGreaterThan(taskMtime);
 
     const summary = buildSessionSummary(s.sessionId, s.lastActiveMs, s.taskFiles.length, now);
@@ -99,6 +102,8 @@ describe("collectSessions — #1121 ledger mtimes keep a 3-role stretch live", (
       sessions = collectSessions(tasksDir, ledgerDir);
     }).not.toThrow();
     expect(sessions).toHaveLength(1);
-    expect(sessions[0].lastActiveMs).toBe(taskMtime);
+    // Tolerance (same sub-second filesystem drift as above): with no ledger dir,
+    // lastActiveMs falls back to the task-file mtime within 1s.
+    expect(Math.abs(sessions[0].lastActiveMs - taskMtime)).toBeLessThan(1000);
   });
 });

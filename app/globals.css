@@ -654,6 +654,33 @@ button {
   box-shadow: 0 0 5px -1px var(--pip);
 }
 
+/* Pips are now the SECONDARY signal (the phase line is primary) — shrink + fade
+   them so the card reads "why it's here" first, not four small dots. */
+.ak-pips--dim {
+  gap: 3px;
+  opacity: 0.5;
+}
+.ak-pips--dim .ak-pip {
+  width: 6px;
+  height: 6px;
+}
+
+/* The PRIMARY "why it's in this lane" line — one compact mono row, tinted by the
+   phase hue (queued / role / review-verdict / done). Sits between the id+pips row
+   and the subject so it never collides with the working/blocked/time footer. */
+.ak-phase {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  margin: 0 0 7px;
+  color: var(--phase);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .ak-card__subject {
   font-family: var(--font-sans);
   font-size: 13.5px;

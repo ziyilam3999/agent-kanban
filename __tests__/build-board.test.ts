@@ -35,6 +35,62 @@ describe("toColumn", () => {
   });
 });
 
+describe("toColumn — pending truthfulness fix (hasPipelineRoleComment)", () => {
+  it("pending + a pipeline-role comment → in_progress (already started)", () => {
+    expect(toColumn("pending", false, true)).toBe("in_progress");
+  });
+
+  it("pending + NO pipeline-role comment → todo", () => {
+    expect(toColumn("pending", false, false)).toBe("todo");
+  });
+
+  it("pending defaults to todo when the third arg is omitted (back-compat)", () => {
+    expect(toColumn("pending", false)).toBe("todo");
+  });
+
+  it("in_progress + execution-review still wins (precedence preserved)", () => {
+    expect(toColumn("in_progress", true, true)).toBe("in_review");
+  });
+
+  it("completed → done regardless of pipeline-role flag", () => {
+    expect(toColumn("completed", false, true)).toBe("done");
+  });
+});
+
+describe("buildTicket — pending derives in_progress from ledger activity", () => {
+  it("pending + a planner comment → in_progress (RED on master: master returns todo)", () => {
+    const t = buildTicket(
+      baseTask({ status: "pending" }),
+      [{ role: "planner", ts: "2026-06-21T04:58:26.116Z" }],
+      1
+    );
+    expect(t.column).toBe("in_progress");
+  });
+
+  it("pending + ONLY an orchestrator comment → todo (no misfire)", () => {
+    const t = buildTicket(
+      baseTask({ status: "pending" }),
+      [{ role: "orchestrator", ts: "2026-06-21T04:58:26.116Z" }],
+      1
+    );
+    expect(t.column).toBe("todo");
+  });
+
+  it("pending + no comments → todo", () => {
+    const t = buildTicket(baseTask({ status: "pending" }), [], 1);
+    expect(t.column).toBe("todo");
+  });
+
+  it("completed → done even with a pipeline-role comment", () => {
+    const t = buildTicket(
+      baseTask({ status: "completed" }),
+      [{ role: "executor", ts: "2026-06-21T04:58:26.116Z" }],
+      1
+    );
+    expect(t.column).toBe("done");
+  });
+});
+
 describe("redact", () => {
   it("strips a synthetic /Users/<name>/ home path so no /Users/<name>/ substring remains", () => {
     const out = redact("/Users/alice/secret/plan.md");

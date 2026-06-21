@@ -4,6 +4,7 @@ import type { Ticket } from "@/lib/board-schema";
 import {
   COLUMN_HUE,
   PIPELINE_ROLES,
+  phaseLine,
   roleColor,
   roleLabel,
 } from "@/lib/ui-meta";
@@ -25,6 +26,7 @@ interface CardProps {
 /** Telemetry tile — left hue rail, id + role pips, clamped subject, blocked/time footer. */
 export function Card({ ticket, nowMs, glow, active, reduce }: CardProps) {
   const hue = COLUMN_HUE[ticket.column];
+  const phase = phaseLine(ticket);
   const rolesSeen = new Set(ticket.comments.map((c) => c.role));
   const blocked = ticket.blockedBy.length > 0;
   // Lift a leading "[#1063]" / "[EPIC]" prefix out of the subject so it doesn't read as a
@@ -46,7 +48,7 @@ export function Card({ ticket, nowMs, glow, active, reduce }: CardProps) {
       <div className="ak-card__top">
         <span className="ak-card__id">#{ticket.id}</span>
         <span
-          className="ak-pips"
+          className="ak-pips ak-pips--dim"
           role="img"
           aria-label={`pipeline progress: ${rolesSeen.size} of 4 roles`}
         >
@@ -63,6 +65,14 @@ export function Card({ ticket, nowMs, glow, active, reduce }: CardProps) {
           })}
         </span>
       </div>
+
+      <p
+        className="ak-phase"
+        style={{ ["--phase" as string]: phase.hueVar }}
+        aria-label={phase.ariaLabel}
+      >
+        {phase.text}
+      </p>
 
       <p className="ak-card__subject">
         {subjectTag.tag && (

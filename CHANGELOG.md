@@ -1,3 +1,9 @@
+## [0.5.0](https://github.com/ziyilam3999/agent-kanban/compare/v0.4.3...v0.5.0) (2026-06-21)
+
+### Features
+
+* **board:** #1100 Slice 3 — derive verdict pill from review artifact Decision line when ledger verdict absent (#22)
+
 # Changelog
 
 All notable changes to this project are documented here. Format mirrors content-pipeline

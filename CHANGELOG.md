@@ -1,3 +1,9 @@
+## [0.7.0](https://github.com/ziyilam3999/agent-kanban/compare/v0.6.0...v0.7.0) (2026-06-21)
+
+### Features
+
+* **board:** #1114 in-progress phase line — distinguish WORKING (active focus, mint+glow) / STARTED (parked, cyan) / ▶ROLE (pipeline), and remove the duplicate footer working signal (one live signal per card) (#26)
+
 ## [0.6.0](https://github.com/ziyilam3999/agent-kanban/compare/v0.5.0...v0.6.0) (2026-06-21)
 
 ### Features

@@ -12,7 +12,10 @@ import { PipelineMeter } from "./PipelineMeter";
 import { SessionPicker } from "./SessionPicker";
 import { Drawer } from "./Drawer";
 
-const POLL_MS = 1500;
+// 5s poll: paired with the /api/board CDN cache (s-maxage=10), most polls are
+// served from the edge, not Compute — the #1138 Fast-Origin-Transfer cut. Board
+// freshness lags at most ~10s, imperceptible for a live dashboard.
+const POLL_MS = 5000;
 // Hold the moved/fresh flag for the full arrival-glow animation (ak-glow 1.9s).
 const GLOW_MS = 2000;
 
@@ -55,6 +58,10 @@ export function BoardView({ initial }: { initial: Board }) {
     let alive = true;
 
     async function poll() {
+      // Skip while the tab is hidden (board left open on a phone in a pocket): no
+      // point spending Edge Requests + Origin/Blob transfer on a board nobody is
+      // looking at. We refresh immediately when it becomes visible again (below).
+      if (typeof document !== "undefined" && document.hidden) return;
       try {
         const res = await fetch("/api/board", { cache: "no-store" });
         if (!res.ok) return;

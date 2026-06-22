@@ -101,11 +101,24 @@ export function BoardView({ initial }: { initial: Board }) {
       }
     }
 
+    // Refresh the instant the tab is focused again so a returning viewer sees fresh
+    // state without waiting for the next interval tick (pairs with the hidden-skip
+    // in poll() above).
+    function onVisible() {
+      if (document.visibilityState === "visible") poll();
+    }
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisible);
+    }
+
     setNow(Date.now());
     const id = setInterval(poll, POLL_MS);
     return () => {
       alive = false;
       clearInterval(id);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisible);
+      }
       if (glowTimer.current) clearTimeout(glowTimer.current);
     };
   }, []);

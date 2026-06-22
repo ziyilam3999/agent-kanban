@@ -1,3 +1,9 @@
+## [0.7.2](https://github.com/ziyilam3999/agent-kanban/compare/v0.7.1...v0.7.2) (2026-06-22)
+
+### Performance Improvements
+
+* **board:** #1138 cut Vercel Fast Origin / Blob / Edge usage — CDN-cache /api/board (s-maxage=10) + a slower (5s), visibility-gated poll. Most polls now hit the edge instead of re-running Compute + re-reading the board from Blob; polling pauses when the tab is hidden. (#30)
+
 ## [0.7.1](https://github.com/ziyilam3999/agent-kanban/compare/v0.7.0...v0.7.1) (2026-06-21)
 
 ### Bug Fixes

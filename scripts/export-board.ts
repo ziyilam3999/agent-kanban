@@ -230,7 +230,11 @@ function main(): void {
   const orphans = detectOrphanBacklog(tickets, sessionSummaries);
   for (const o of orphans) {
     console.error(
-      `⚠ orphan-backlog: ${o.sessionId}=${o.openCount} open ticket(s) under a non-live session — run: npm run kanban:handoff --to ${board.sessionId}`
+      // `--to` must be the FULL session dir name (the live session id), NOT the
+      // 8-char display id (`board.sessionId`): the handoff CLI treats `--to` as
+      // the literal task-dir name, so a truncated id would move the backlog into
+      // a bogus dir no session reads (ship-fix #1).
+      `⚠ orphan-backlog: ${o.sessionId}=${o.openCount} open ticket(s) under a non-live session — run: npm run kanban:handoff --to ${chosen.sessionId}`
     );
   }
 }

@@ -60,6 +60,8 @@ describe("orphan-backlog warning emits a runnable --to (ship-fix #1)", () => {
       },
       encoding: "utf8",
       timeout: 60_000,
+      // Windows: `npx` is npx.cmd and is not directly spawnable without a shell.
+      shell: true,
     });
 
     const stderr = res.stderr || "";

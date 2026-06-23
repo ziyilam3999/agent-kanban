@@ -1,3 +1,9 @@
+## [0.8.0](https://github.com/ziyilam3999/agent-kanban/compare/v0.7.2...v0.8.0) (2026-06-24)
+
+### Features
+
+* **handoff:** #1184 session-handoff ticket migration — `npm run kanban:handoff` re-homes open tickets to the live session on /clear so the board + native task tools follow it; + `detectOrphanBacklog` non-fatal orphan-backlog warning ([#32](https://github.com/ziyilam3999/agent-kanban/pull/32))
+
 ## [0.7.2](https://github.com/ziyilam3999/agent-kanban/compare/v0.7.1...v0.7.2) (2026-06-22)
 
 ### Performance Improvements

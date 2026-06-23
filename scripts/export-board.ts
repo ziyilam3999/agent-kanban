@@ -16,6 +16,7 @@ import {
   buildBoard,
   buildSessionSummary,
   buildTicket,
+  detectOrphanBacklog,
   type RawLedgerLine,
   type RawTask,
 } from "../lib/build-board";
@@ -222,6 +223,16 @@ function main(): void {
   console.log(
     `export-board: active ${board.sessionId} · ${tickets.length} tickets across ${sessionSummaries.length} sessions · ${summary} → ${OUT}`
   );
+
+  // Non-fatal backstop: warn if OPEN tickets are stranded under a non-live
+  // (superseded) session while a live session exists — the post-`/clear` orphan
+  // signal. The fix is to migrate them into the live session (#1184).
+  const orphans = detectOrphanBacklog(tickets, sessionSummaries);
+  for (const o of orphans) {
+    console.error(
+      `⚠ orphan-backlog: ${o.sessionId}=${o.openCount} open ticket(s) under a non-live session — run: npm run kanban:handoff --to ${board.sessionId}`
+    );
+  }
 }
 
 // Run the exporter only when invoked as a script — NOT when imported by a unit

@@ -269,6 +269,58 @@ export function buildSessionSummary(
   };
 }
 
+/** The display columns that represent OPEN (non-terminal) work. `done` is terminal. */
+const OPEN_COLUMNS = new Set<Column>(["todo", "in_progress", "in_review"]);
+
+/** One non-live session holding orphaned open work, with its open-ticket count. */
+export interface OrphanBacklog {
+  /** 8-char session id (matches `SessionSummary.id` and `Ticket.sessionId`). */
+  sessionId: string;
+  /** Number of OPEN tickets stranded under this non-live session. */
+  openCount: number;
+}
+
+/**
+ * PURE: detect orphaned backlog — OPEN tickets (todo|in_progress|in_review)
+ * stranded under a NON-live (superseded) session while a LIVE session exists.
+ *
+ * This is the genuine post-`/clear` orphan signal: when a session is retired the
+ * agent-kanban backlog stays under the dead session's id, so the new live session
+ * can't see or update it. It fires in that canonical case (open work under a
+ * non-live prior session + a newer live session present) and stays SILENT when
+ * the board merely spans several LIVE sessions (normal concurrent multi-agent
+ * work is multi-session by design). Reuses the `SessionSummary.live` signal.
+ *
+ * Returns one entry per non-live session that holds ≥1 open ticket, sorted by
+ * open count (desc). Empty when no live session exists (no migration target) or
+ * when all open tickets already sit under a live session.
+ */
+export function detectOrphanBacklog(
+  tickets: Ticket[],
+  sessions: SessionSummary[]
+): OrphanBacklog[] {
+  // No live session → no migration target → not an actionable orphan signal.
+  if (!sessions.some((s) => s.live)) return [];
+
+  // sessionId(8-char) → live? — sessions absent from this map are ignored.
+  const liveById = new Map<string, boolean>(sessions.map((s) => [s.id, s.live]));
+
+  const counts = new Map<string, number>();
+  for (const t of tickets) {
+    const sid = t.sessionId;
+    if (!sid) continue;
+    // Only count tickets under an EXPLICITLY non-live session (live === false);
+    // live sessions and unknown ids are skipped.
+    if (liveById.get(sid) !== false) continue;
+    if (!OPEN_COLUMNS.has(t.column)) continue; // terminal (done) — not open
+    counts.set(sid, (counts.get(sid) ?? 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .map(([sessionId, openCount]) => ({ sessionId, openCount }))
+    .sort((a, b) => b.openCount - a.openCount);
+}
+
 /** Inputs to buildBoard — all already-parsed/derived; generatedAt is passed IN. */
 export interface BuildBoardInput {
   generatedAt: number;

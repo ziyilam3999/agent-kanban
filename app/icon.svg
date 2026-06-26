@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" role="img" aria-label="agent-kanban">
+  <!-- agent-kanban favicon — "live column": three bars, one glowing mint live signal -->
+  <rect x="0" y="0" width="32" height="32" rx="7" fill="#0a0e12"/>
+  <!-- tile edge: holds a hairline so the ink tile keeps an outline on a dark tab bar -->
+  <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="6.5" fill="none" stroke="#1f2a33" stroke-width="1.5"/>
+  <!-- hero bar glow halo (the only lit element) -->
+  <rect x="11.5" y="4" width="9" height="23" rx="4" fill="#3ef2b0" fill-opacity="0.22"/>
+  <!-- left dim/structural bar -->
+  <rect x="7" y="16" width="5" height="9" rx="1.5" fill="#5b6b78"/>
+  <!-- hero mint bar — tallest + widest, the live column -->
+  <rect x="13" y="7" width="6" height="18" rx="1.5" fill="#3ef2b0"/>
+  <!-- right dim/structural bar -->
+  <rect x="20.5" y="12.5" width="5" height="12.5" rx="1.5" fill="#5b6b78"/>
+</svg>

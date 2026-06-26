@@ -1,3 +1,9 @@
+## [0.9.0](https://github.com/ziyilam3999/agent-kanban/compare/v0.8.0...v0.9.0) (2026-06-26)
+
+### Features
+
+* **favicon:** #1174 browser-tab favicon — a dark `--ink` tile carrying the signature glowing `--live` mint "live column" mark (three bars, one lit), replacing the default globe. Wired via the Next.js App Router metadata-file convention (`app/icon.svg` + `app/icon.png` 32×32 + `app/apple-icon.png` 180×180); chosen via the frontend-design + ui-evolve ritual (design_brief + ui_evolve_verdict).
+
 ## [0.8.0](https://github.com/ziyilam3999/agent-kanban/compare/v0.7.2...v0.8.0) (2026-06-24)
 
 ### Features

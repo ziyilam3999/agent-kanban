@@ -75,3 +75,13 @@ re-exports `data/board.json` and, only when a Blob token is resolvable, uploads 
 PostToolUse entry to `~/.claude/settings.json` whose command is the absolute path to
 `scripts/on-task-change.sh` (matcher scoped to the task-writing tool you use); it is
 idempotent and fast, so re-running it per change is cheap.
+
+**Sync logbook + background-token note (#1158).** Every courier run appends one JSONL
+line to `data/sync.log` (gitignored) recording its outcome — `uploaded` / `skipped-no-token`
+/ `failed` (override the path with the `SYNC_LOG` env var). So a sync is never silent: if
+a background run skips, the reason is on the record. To make **background** syncs reliably
+*upload* (not just log a clean skip), export `BLOB_READ_WRITE_TOKEN` into the hook/launch
+environment — the macOS Keychain is not reliably readable from a detached/background shell,
+so the env path is the durable background option. This adds **no** secret to any committed
+file. With no reachable token, the hook re-exports locally and logs `skipped-no-token`,
+still exiting 0.

@@ -1,3 +1,9 @@
+## [0.9.1](https://github.com/ziyilam3999/agent-kanban/compare/v0.9.0...v0.9.1) (2026-06-26)
+
+### Bug Fixes
+
+* **sync:** #1158 kanban-sync reliability — a persistent JSONL sync logbook (`data/sync.log`, gitignored) records every courier attempt (`uploaded` / `skipped-no-token` / `failed`) before it exits, so a background sync is never silent. Removed the `on-task-change.sh` `security` pre-probe that false-negatived from a background/detached shell (Keychain reads don't work without the interactive login context) and silently skipped the upload even with a real env token present; the hook now unconditionally runs the courier, which owns token resolution + outcome logging and still exits 0 (PostToolUse contract preserved via a non-aborting wrapper). On a non-zero `export:board` the hook logs an `export-failed` record so a stale board can't be silently re-uploaded. Adds hermetic courier unit tests + a mandatory end-to-end hook smoke (Keychain neutralized via a `PATH` `security` stub — no real Keychain read, no real upload during tests).
+
 ## [0.9.0](https://github.com/ziyilam3999/agent-kanban/compare/v0.8.0...v0.9.0) (2026-06-26)
 
 ### Features

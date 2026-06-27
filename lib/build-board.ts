@@ -140,11 +140,16 @@ export function basenameOf(p: string): string {
 
 /**
  * Map a raw task status (+ derived ledger signals) to a display Column:
- *   completed                                  → done
- *   in_progress + execution-review in ledger   → in_review
- *   in_progress otherwise                       → in_progress
- *   pending + a pipeline-role comment           → in_progress (already started)
- *   pending otherwise                           → todo
+ *   completed                                       → done
+ *   in_progress + a PENDING execution-review        → in_review
+ *   in_progress otherwise                            → in_progress
+ *   pending + a pipeline-role comment                → in_progress (already started)
+ *   pending otherwise                                → todo
+ *
+ * `hasPendingExecutionReview` is TRUE iff the NEWEST execution-review ledger line is
+ * still unresolved (no verdict). A resolved (PASS/FAIL) execution-review, or none at
+ * all, leaves an in_progress task in in_progress — "a review is pending NOW", not
+ * "a review ever happened" (#1304).
  *
  * `hasPipelineRoleComment` is TRUE iff the ledger carries ≥1 comment whose role is a
  * PIPELINE_ROLES member (planner / plan-review / executor / execution-review).
@@ -152,18 +157,52 @@ export function basenameOf(p: string): string {
  */
 export function toColumn(
   status: RawTask["status"],
-  hasExecutionReview: boolean,
+  hasPendingExecutionReview: boolean,
   hasPipelineRoleComment = false
 ): Column {
   switch (status) {
     case "completed":
       return "done";
     case "in_progress":
-      return hasExecutionReview ? "in_review" : "in_progress";
+      return hasPendingExecutionReview ? "in_review" : "in_progress";
     case "pending":
     default:
       return hasPipelineRoleComment ? "in_progress" : "todo";
   }
+}
+
+/**
+ * Resolve a review line's verdict: PRIMARY explicit `verdict` field (trimmed,
+ * non-empty), FALLBACK the artifact's `Decision:` token (review-roles only, via a
+ * guarded best-effort artifact read). Returns the RAW token (no redact / no cap)
+ * or undefined when no verdict can be resolved. Pure except the guarded read —
+ * never throws. This is the SINGLE source of truth for verdict resolution: both
+ * `toComment` (display) and `hasPendingExecutionReview` (column) call it.
+ */
+function resolveVerdict(line: RawLedgerLine): string | undefined {
+  // PRIMARY: an explicit verdict recorded on the ledger line.
+  if (typeof line.verdict === "string") {
+    const v = line.verdict.trim();
+    if (v) return v;
+  }
+
+  // FALLBACK: review-role line with no ledger verdict but a readable artifact
+  // carrying a `Decision: <token>` line (e.g. a review recorded without
+  // --verdict). Best-effort + safe — never throws, never crashes board build.
+  if (
+    REVIEW_ROLES.has(line.role) &&
+    typeof line.artifact_path === "string" &&
+    line.artifact_path.length > 0
+  ) {
+    const text = readArtifactHead(line.artifact_path);
+    const decision = text ? extractDecisionVerdict(text) : undefined;
+    if (decision) {
+      const d = decision.trim();
+      if (d) return d;
+    }
+  }
+
+  return undefined;
 }
 
 /** Parse one ledger line into a redacted, UI-safe comment. */
@@ -173,30 +212,41 @@ function toComment(line: RawLedgerLine): LedgerComment {
   if (line.artifact_path) c.artifact = redact(basenameOf(line.artifact_path));
   if (line.skip_reason) c.skipReason = line.skip_reason;
 
-  // PRIMARY: an explicit verdict recorded on the ledger line.
-  if (typeof line.verdict === "string") {
-    const v = redact(line.verdict.trim()).slice(0, VERDICT_MAX_LEN);
+  // Resolve the verdict from the single source of truth, then apply the
+  // display-only redact + length cap. The post-redact truthiness guard is kept:
+  // a raw token that redacts to empty must STILL not set a verdict.
+  const raw = resolveVerdict(line);
+  if (raw !== undefined) {
+    const v = redact(raw).slice(0, VERDICT_MAX_LEN);
     if (v) c.verdict = v;
   }
 
-  // FALLBACK: review-role line with no ledger verdict but a readable artifact
-  // carrying a `Decision: <token>` line (e.g. a review recorded without
-  // --verdict). Best-effort + safe — never throws, never crashes board build.
-  if (
-    !c.verdict &&
-    REVIEW_ROLES.has(line.role) &&
-    typeof line.artifact_path === "string" &&
-    line.artifact_path.length > 0
-  ) {
-    const text = readArtifactHead(line.artifact_path);
-    const decision = text ? extractDecisionVerdict(text) : undefined;
-    if (decision) {
-      const v = redact(decision.trim()).slice(0, VERDICT_MAX_LEN);
-      if (v) c.verdict = v;
+  return c;
+}
+
+/**
+ * TRUE iff the NEWEST `execution-review` ledger line is still PENDING (no resolved
+ * verdict). "Newest" = max by parsed `ts`; a tie (equal `ts`, or all `ts`
+ * NaN/missing) is broken by LATEST array index — the ledger is append-ordered, so
+ * the last-appended execution-review is the genuinely newest at equal-second
+ * granularity. A NaN/missing `ts` sorts as oldest. Returns false when there is no
+ * execution-review at all. (MINOR-1 tiebreak; #1304.)
+ */
+function hasPendingExecutionReview(ledgerLines: RawLedgerLine[]): boolean {
+  let newest: RawLedgerLine | undefined;
+  let newestTs = -Infinity; // NaN/missing ts sorts as oldest (-Infinity)
+  for (const line of ledgerLines) {
+    if (line.role !== "execution-review") continue;
+    const parsed = Date.parse(line.ts);
+    const ts = Number.isNaN(parsed) ? -Infinity : parsed;
+    // `>=` over a forward scan: on a tie the LATER array index wins (append-order).
+    if (newest === undefined || ts >= newestTs) {
+      newest = line;
+      newestTs = ts;
     }
   }
-
-  return c;
+  if (newest === undefined) return false;
+  return resolveVerdict(newest) === undefined;
 }
 
 /**
@@ -213,9 +263,7 @@ export function buildTicket(
     .sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts))
     .map(toComment);
 
-  const hasExecutionReview = ledgerLines.some(
-    (l) => l.role === "execution-review"
-  );
+  const pendingExecutionReview = hasPendingExecutionReview(ledgerLines);
   // TRUE iff any ledger comment is from a pipeline role (orchestrator excluded) —
   // lets a pending task that a role has already started surface as in_progress.
   const hasPipelineRoleComment = ledgerLines.some((l) =>
@@ -226,7 +274,7 @@ export function buildTicket(
     id: rawTask.id,
     subject: rawTask.subject,
     description: redact(rawTask.description ?? ""),
-    column: toColumn(rawTask.status, hasExecutionReview, hasPipelineRoleComment),
+    column: toColumn(rawTask.status, pendingExecutionReview, hasPipelineRoleComment),
     status: rawTask.status,
     blockedBy: rawTask.blockedBy ?? [],
     comments,

@@ -403,6 +403,138 @@ describe("buildTicket — verdict-from-artifact fallback (seam B, no --verdict)"
   });
 });
 
+describe("buildTicket — in_review means review PENDING NOW, not ever (#1304)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "akb-pending-"));
+  const writeArtifact = (name: string, body: string): string => {
+    const p = join(dir, name);
+    writeFileSync(p, body, "utf8");
+    return p;
+  };
+
+  it("(a) in_progress + execution-review WITH verdict PASS → in_progress (resolved, not pending)", () => {
+    const t = buildTicket(
+      baseTask({ status: "in_progress" }),
+      [{ role: "execution-review", ts: "2026-06-27T05:00:00.000Z", verdict: "PASS" }],
+      1
+    );
+    expect(t.column).toBe("in_progress");
+  });
+
+  it("(a') in_progress + execution-review WITH verdict FAIL → in_progress (resolved, not pending)", () => {
+    const t = buildTicket(
+      baseTask({ status: "in_progress" }),
+      [{ role: "execution-review", ts: "2026-06-27T05:00:00.000Z", verdict: "FAIL" }],
+      1
+    );
+    expect(t.column).toBe("in_progress");
+  });
+
+  it("(b) in_progress + execution-review WITHOUT verdict → in_review (pending)", () => {
+    const t = buildTicket(
+      baseTask({ status: "in_progress" }),
+      [{ role: "execution-review", ts: "2026-06-27T05:00:00.000Z" }],
+      1
+    );
+    expect(t.column).toBe("in_review");
+  });
+
+  it("(c) completed + a resolved execution-review → done (unchanged)", () => {
+    const t = buildTicket(
+      baseTask({ status: "completed" }),
+      [{ role: "execution-review", ts: "2026-06-27T05:00:00.000Z", verdict: "PASS" }],
+      1
+    );
+    expect(t.column).toBe("done");
+  });
+
+  it("(d) in_progress + empty ledger → in_progress (unchanged)", () => {
+    const t = buildTicket(baseTask({ status: "in_progress" }), [], 1);
+    expect(t.column).toBe("in_progress");
+  });
+
+  it("(e) in_progress + execution-review no verdict but artifact Decision: PASS → in_progress (fallback resolves)", () => {
+    const artifact = writeArtifact(
+      "exec-review-pass.md",
+      "# Execution review\n\nLooks good.\n\nDecision: PASS\n"
+    );
+    const t = buildTicket(
+      baseTask({ status: "in_progress" }),
+      [{ role: "execution-review", ts: "2026-06-27T05:00:00.000Z", artifact_path: artifact }],
+      1
+    );
+    expect(t.column).toBe("in_progress");
+  });
+
+  it("(f) two execution-reviews, older pending + newer resolved → in_progress (newest-wins)", () => {
+    const t = buildTicket(
+      baseTask({ status: "in_progress" }),
+      [
+        { role: "execution-review", ts: "2026-06-27T05:00:00.000Z" },
+        { role: "execution-review", ts: "2026-06-27T06:00:00.000Z", verdict: "PASS" },
+      ],
+      1
+    );
+    expect(t.column).toBe("in_progress");
+  });
+
+  it("(g) two execution-reviews, older resolved FAIL + newer pending → in_review (newest pending)", () => {
+    const t = buildTicket(
+      baseTask({ status: "in_progress" }),
+      [
+        { role: "execution-review", ts: "2026-06-27T05:00:00.000Z", verdict: "FAIL" },
+        { role: "execution-review", ts: "2026-06-27T06:00:00.000Z" },
+      ],
+      1
+    );
+    expect(t.column).toBe("in_review");
+  });
+
+  it("equal-ts tiebreak: last-in-array-order wins — [resolved, pending] → in_review (MINOR-1)", () => {
+    const t = buildTicket(
+      baseTask({ status: "in_progress" }),
+      [
+        { role: "execution-review", ts: "2026-06-27T05:00:00.000Z", verdict: "PASS" },
+        { role: "execution-review", ts: "2026-06-27T05:00:00.000Z" },
+      ],
+      1
+    );
+    expect(t.column).toBe("in_review");
+  });
+
+  it("equal-ts tiebreak: last-in-array-order wins — [pending, resolved] → in_progress (MINOR-1)", () => {
+    const t = buildTicket(
+      baseTask({ status: "in_progress" }),
+      [
+        { role: "execution-review", ts: "2026-06-27T05:00:00.000Z" },
+        { role: "execution-review", ts: "2026-06-27T05:00:00.000Z", verdict: "PASS" },
+      ],
+      1
+    );
+    expect(t.column).toBe("in_progress");
+  });
+
+  it("all-NaN ts tiebreak: last-in-array-order wins — [resolved, pending] → in_review (MINOR-1)", () => {
+    const t = buildTicket(
+      baseTask({ status: "in_progress" }),
+      [
+        { role: "execution-review", ts: "not-a-date", verdict: "PASS" },
+        { role: "execution-review", ts: "also-not-a-date" },
+      ],
+      1
+    );
+    expect(t.column).toBe("in_review");
+  });
+
+  it("plan-review-only ledger → in_progress (no execution-review, never drove in_review)", () => {
+    const t = buildTicket(
+      baseTask({ status: "in_progress" }),
+      [{ role: "plan-review", ts: "2026-06-27T05:00:00.000Z" }],
+      1
+    );
+    expect(t.column).toBe("in_progress");
+  });
+});
+
 describe("buildSessionSummary", () => {
   const now = 1_700_000_000_000;
 

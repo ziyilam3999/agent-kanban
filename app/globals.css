@@ -607,6 +607,168 @@ button {
   }
 }
 
+/* ----------------------------------------------------- Header status cluster */
+/* Lane counter sits left of the LIVE/IDLE badge in the header row. */
+.ak-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* "N LANES LIVE" — the one phosphor-mint count of concurrent live chains. */
+.ak-lanecount {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: var(--live);
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--live) 28%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--live) 7%, transparent);
+  white-space: nowrap;
+}
+
+/* ----------------------------------------------------- Live Swimlanes */
+/* Additive, conditional view above the column board: one row per live chain,
+   each a 4-role track with exactly one stage lit. Transform/opacity-only motion,
+   zero layout shift — the telemetry-console rule. */
+.ak-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px 14px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.ak-lane-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.ak-lane-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 38%;
+}
+
+.ak-lane-id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+
+.ak-lane-subject {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.ak-lane-track {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex: 1 1 62%;
+}
+
+.ak-lane-stage {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  text-align: center;
+}
+
+.ak-lane-stage__label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Prior stages: tinted with the role hue, reading as "completed". */
+.ak-lane-stage--done {
+  border-color: color-mix(in srgb, var(--stage) 35%, var(--line));
+  color: color-mix(in srgb, var(--stage) 70%, var(--fg-dim));
+  background: color-mix(in srgb, var(--stage) 8%, var(--panel));
+}
+
+/* The single lit stage: one phosphor-mint signal per row. */
+.ak-lane-stage--live {
+  border-color: color-mix(in srgb, var(--live) 55%, transparent);
+  color: var(--live);
+  background: color-mix(in srgb, var(--live) 12%, var(--panel));
+  box-shadow: 0 0 8px 0 color-mix(in srgb, var(--live) 35%, transparent);
+}
+
+.ak-lane-stage--live .ak-lane-stage__pulse {
+  display: inline-flex;
+}
+
+/* Future stages: dim, awaiting. */
+.ak-lane-stage--pending {
+  color: var(--fg-faint);
+  background: var(--panel);
+}
+
+/* Mobile: stack lanes full-width, drop the 4-role track onto its own line under
+   the ticket label so nothing is crammed or overflows the viewport. */
+@media (max-width: 640px) {
+  .ak-lanes {
+    margin: 12px 10px 0;
+    padding: 10px;
+  }
+  .ak-lane-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .ak-lane-head {
+    flex: initial;
+  }
+  .ak-lane-track {
+    flex: initial;
+  }
+  .ak-lane-stage {
+    padding: 6px 4px;
+  }
+}
+
+/* Reduced motion: kill the lit-stage pulse; the static bright-mint highlight stays
+   so the current stage is still unmistakable. */
+@media (prefers-reduced-motion: reduce) {
+  .ak-lane-stage__pulse {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+}
+
 .ak-card__top {
   display: flex;
   align-items: center;

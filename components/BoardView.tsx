@@ -6,8 +6,10 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { Board, Column, Ticket } from "@/lib/board-schema";
 import { COLUMNS, COLUMN_LABELS } from "@/lib/board-schema";
 import { computeActiveIds } from "@/lib/active";
+import { deriveLanes } from "@/lib/lanes";
 import { COLUMN_HUE } from "@/lib/ui-meta";
 import { Card } from "./Card";
+import { LiveSwimlanes } from "./LiveSwimlanes";
 import { PipelineMeter } from "./PipelineMeter";
 import { SessionPicker } from "./SessionPicker";
 import { Drawer } from "./Drawer";
@@ -186,6 +188,13 @@ export function BoardView({ initial }: { initial: Board }) {
     [visible, isLive, now],
   );
 
+  // ---- Live swimlanes — one lane per genuinely-live in-progress chain ----
+  // Pure client derivation over the activeIds set already in hand (NO new fetch).
+  // The header counter shows the count whenever >= 1; the swimlane ROWS mount only
+  // when >= 2 (genuine parallel work), above the unchanged column board.
+  const lanes = useMemo(() => deriveLanes(visible, activeIds), [visible, activeIds]);
+  const laneCount = activeIds.size;
+
   const onStripScroll = useCallback(() => {
     const el = stripRef.current;
     if (!el) return;
@@ -218,18 +227,29 @@ export function BoardView({ initial }: { initial: Board }) {
               selectedId={selectedSession}
             />
           </div>
-          <span
-            className={`ak-live${isLive ? "" : " ak-live--off"}`}
-            aria-live="polite"
-          >
-            <span className="ak-live__dot" aria-hidden />
-            {isLive ? "LIVE" : "IDLE"}
-          </span>
+          <div className="ak-status">
+            {laneCount >= 1 && (
+              <span className="ak-lanecount" aria-live="polite">
+                {laneCount} {laneCount === 1 ? "LANE" : "LANES"} LIVE
+              </span>
+            )}
+            <span
+              className={`ak-live${isLive ? "" : " ak-live--off"}`}
+              aria-live="polite"
+            >
+              <span className="ak-live__dot" aria-hidden />
+              {isLive ? "LIVE" : "IDLE"}
+            </span>
+          </div>
         </div>
         <PipelineMeter tickets={visible} />
       </header>
 
       <main>
+        {lanes.length >= 2 && (
+          <LiveSwimlanes lanes={lanes} reduce={!!reduce} />
+        )}
+
         <div
           className="ak-strip"
           ref={stripRef}

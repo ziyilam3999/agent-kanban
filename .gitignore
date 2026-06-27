@@ -29,5 +29,10 @@ out/
 dist/
 *.tsbuildinfo
 
+# --- Playwright (e2e DOM-acceptance run artifacts; the specs under e2e/ ARE tracked) ---
+test-results/
+playwright-report/
+.playwright/
+
 # --- OS ---
 .DS_Store

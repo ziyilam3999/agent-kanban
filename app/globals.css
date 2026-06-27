@@ -740,6 +740,25 @@ button {
 /* Mobile: stack lanes full-width, drop the 4-role track onto its own line under
    the ticket label so nothing is crammed or overflows the viewport. */
 @media (max-width: 640px) {
+  /* #1295: the lane counter adds a second pill to the header status cluster.
+     On narrow viewports the brand + "N LANES LIVE" + the LIVE/IDLE badge no
+     longer fit on one row (they pushed ~18px past the viewport edge). Let the
+     header row wrap — the status cluster drops below the brand, right-aligned —
+     so nothing overflows the viewport (the telemetry-console "no horizontal
+     overflow" rule). Transform/opacity-only motion is untouched. */
+  .ak-header__row {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  .ak-status {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    margin-left: auto;
+  }
+  .ak-lanecount {
+    letter-spacing: 0.12em;
+  }
+
   .ak-lanes {
     margin: 12px 10px 0;
     padding: 10px;

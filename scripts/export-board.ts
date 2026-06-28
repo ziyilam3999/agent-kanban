@@ -57,38 +57,49 @@ interface SessionInfo {
   dir: string;
   taskFiles: string[];
   lastActiveMs: number;
+  /** taskId → that ticket's 3-role ledger file mtime (ms epoch). One guarded
+   *  scan per session; missing dir → empty Map. Folded into each ticket's
+   *  `updatedAt` (#1305) AND into the session `lastActiveMs` (subsuming the old
+   *  per-session `newestLedgerMtimeMs` scan with byte-identical behavior). */
+  ledgerMtimes: Map<string, number>;
 }
 
 /**
- * Fold the newest 3-role ledger mtime for a session into `seed` (returning the
- * max). A long pipeline stretch (planner→…→execution-review, 20-40 min) bumps
- * ONLY the ledger files at `<ledgerDir>/<sessionId>/*.jsonl` (each `3role-ledger
- * append`), NOT the task files — so without this the task-file-only mtime goes
- * stale mid-work, the session reads not-live, no ticket breathes, and the board
- * shows IDLE while the agent is actively working (#1121). Fully guarded: a
- * missing ledger dir / unreadable file never throws — it falls back to `seed`.
+ * Map each ticket's 3-role ledger file to its mtime for a session: one guarded
+ * `readdirSync` of `<ledgerDir>/<sessionId>/`, mapping every `<taskId>.jsonl`
+ * file → its `statSync().mtimeMs`. During a 4-role chain the work appends to
+ * `<ledgerDir>/<session>/<taskId>.jsonl` WITHOUT touching the task file, so this
+ * per-ticket ledger mtime is the freshness signal that keeps the ticket's lane
+ * lit mid-work (#1305 — the per-ticket twin of the session-level #1121 fix).
+ *
+ * Fully guarded (same discipline as the old `newestLedgerMtimeMs`): a missing
+ * ledger dir returns an empty Map; an unreadable/non-file entry is skipped;
+ * never throws. The `isFile()` guard keeps this BYTE-IDENTICAL to the prior
+ * `newestLedgerMtimeMs` fold so the session `lastActiveMs` semantics are
+ * unchanged (a dir entry named `X.jsonl` is excluded by both).
  */
-function newestLedgerMtimeMs(
+export function ledgerMtimeByTaskId(
   ledgerDir: string,
-  sessionId: string,
-  seed: number
-): number {
-  let newest = seed;
+  sessionId: string
+): Map<string, number> {
+  const out = new Map<string, number>();
   try {
     const sessionLedgerDir = path.join(ledgerDir, sessionId);
     for (const f of fs.readdirSync(sessionLedgerDir)) {
       if (!f.endsWith(".jsonl")) continue;
       try {
         const st = fs.statSync(path.join(sessionLedgerDir, f));
-        if (st.isFile() && st.mtimeMs > newest) newest = st.mtimeMs;
+        if (!st.isFile()) continue;
+        const taskId = f.slice(0, -".jsonl".length);
+        out.set(taskId, st.mtimeMs);
       } catch {
         /* ignore unreadable ledger file */
       }
     }
   } catch {
-    /* no ledger dir for this session — fall back to the task-file mtime */
+    /* no ledger dir for this session — empty Map */
   }
-  return newest;
+  return out;
 }
 
 export function collectSessions(
@@ -121,10 +132,15 @@ export function collectSessions(
         /* ignore unreadable */
       }
     }
-    // Fold in the session's newest 3-role ledger mtime so a long pipeline
-    // stretch (ledger-only activity) keeps the session live (#1121).
-    lastActiveMs = newestLedgerMtimeMs(ledgerDir, name, lastActiveMs);
-    out.push({ sessionId: name, dir, taskFiles, lastActiveMs });
+    // Build the per-ticket ledger-mtime map ONCE per session, then reuse it for
+    // both folds: (a) the session `lastActiveMs` (subsumes the old
+    // `newestLedgerMtimeMs` — max of task mtime + all ledger mtimes keeps a long
+    // pipeline stretch live, #1121), and (b) each ticket's `updatedAt` (#1305).
+    const ledgerMtimes = ledgerMtimeByTaskId(ledgerDir, name);
+    for (const m of ledgerMtimes.values()) {
+      if (m > lastActiveMs) lastActiveMs = m;
+    }
+    out.push({ sessionId: name, dir, taskFiles, lastActiveMs, ledgerMtimes });
   }
   // newest-first by last activity (now reflects true activity incl. ledger).
   out.sort((a, b) => b.lastActiveMs - a.lastActiveMs);
@@ -196,7 +212,13 @@ function main(): void {
           const parsed = readTask(file);
           if (!parsed) return null;
           const ledger = readLedger(s.sessionId, parsed.task.id);
-          return buildTicket(parsed.task, ledger, parsed.mtimeMs, sid);
+          return buildTicket(
+            parsed.task,
+            ledger,
+            parsed.mtimeMs,
+            sid,
+            s.ledgerMtimes.get(parsed.task.id)
+          );
         })
         .filter((t): t is NonNullable<typeof t> => t !== null);
     })

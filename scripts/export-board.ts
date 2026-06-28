@@ -4,10 +4,11 @@
 // snapshot to OUT (default data/board.json). NEVER prints secrets or home paths.
 //
 // Env:
-//   TASKS_DIR   default <homedir>/.claude/tasks
-//   LEDGER_DIR  default <homedir>/.claude/3role-ledger
-//   SESSION_ID  default = the session whose task dir has the NEWEST task-file mtime
-//   OUT         default data/board.json
+//   TASKS_DIR     default <homedir>/.claude/tasks
+//   LEDGER_DIR    default <homedir>/.claude/3role-ledger
+//   HEARTBEAT_DIR default <homedir>/.claude/lane-heartbeats
+//   SESSION_ID    default = the session whose task dir has the NEWEST task-file mtime
+//   OUT           default data/board.json
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -26,6 +27,14 @@ const HOME = os.homedir();
 const TASKS_DIR = process.env.TASKS_DIR || path.join(HOME, ".claude", "tasks");
 const LEDGER_DIR =
   process.env.LEDGER_DIR || path.join(HOME, ".claude", "3role-ledger");
+// Generic session-keyed lane-heartbeat markers (#1317). A global PostToolUse
+// hook in ai-brain touches `<HEARTBEAT_DIR>/<session_id>.beat` on tool activity
+// in ANY repo, so a non-4-role lane (no 3-role ledger) still emits a freshness
+// signal. The path mirrors TASKS_DIR / LEDGER_DIR (os.homedir() runtime, never
+// committed). The marker is an EMPTY file — its mtime is the entire signal.
+const HEARTBEAT_DIR =
+  process.env.HEARTBEAT_DIR ||
+  path.join(HOME, ".claude", "lane-heartbeats");
 const OUT = process.env.OUT || path.join("data", "board.json");
 
 /** A session dir is invalid if it is scratch (_quarantine / test-sess prefixes) or has no task files. */
@@ -102,9 +111,47 @@ export function ledgerMtimeByTaskId(
   return out;
 }
 
+/**
+ * Map each session's lane-heartbeat marker to its mtime: one guarded
+ * `readdirSync` of `heartbeatDir`, mapping every `<sessionId>.beat` FILE → its
+ * `statSync().mtimeMs`. This is the structural twin of `ledgerMtimeByTaskId`,
+ * but one level UP — keyed by SESSION, not taskId, because the generic global
+ * writer hook fires on a plain tool call that exposes only the `session_id`
+ * (#1317). The markers are flat in `heartbeatDir` (NOT nested under a
+ * per-session subdir like the ledger's `<session>/<taskId>.jsonl`).
+ *
+ * Fully guarded (same discipline as `ledgerMtimeByTaskId`): a missing dir
+ * returns an empty Map; non-`.beat` entries and a directory named `X.beat`
+ * (`isFile()` guard) are skipped; never throws. The marker CONTENTS are never
+ * read — the mtime is the entire freshness signal. Takes an injectable
+ * `heartbeatDir` so tests point it at a synthetic temp dir.
+ */
+export function heartbeatMtimeBySession(
+  heartbeatDir: string
+): Map<string, number> {
+  const out = new Map<string, number>();
+  try {
+    for (const f of fs.readdirSync(heartbeatDir)) {
+      if (!f.endsWith(".beat")) continue;
+      try {
+        const st = fs.statSync(path.join(heartbeatDir, f));
+        if (!st.isFile()) continue;
+        const sessionId = f.slice(0, -".beat".length);
+        out.set(sessionId, st.mtimeMs);
+      } catch {
+        /* ignore unreadable heartbeat marker */
+      }
+    }
+  } catch {
+    /* no heartbeat dir — empty Map */
+  }
+  return out;
+}
+
 export function collectSessions(
   tasksDir: string = TASKS_DIR,
-  ledgerDir: string = LEDGER_DIR
+  ledgerDir: string = LEDGER_DIR,
+  heartbeatDir: string = HEARTBEAT_DIR
 ): SessionInfo[] {
   let dirs: string[] = [];
   try {
@@ -112,6 +159,12 @@ export function collectSessions(
   } catch {
     return [];
   }
+  // Generic session-keyed lane-heartbeat freshness (#1317), scanned ONCE: a
+  // non-4-role lane writes no 3-role ledger, so without this fold a quiet
+  // content-lane-only session keeps a stale task-file mtime → not live → its
+  // lane never counts. Folded into `lastActiveMs` by the SAME `max` rule as the
+  // ledger fold below (purely additive — no `.beat` ⇒ no effect ⇒ no regression).
+  const heartbeatMtimes = heartbeatMtimeBySession(heartbeatDir);
   const out: SessionInfo[] = [];
   for (const name of dirs) {
     if (isExcludedName(name)) continue;
@@ -139,6 +192,13 @@ export function collectSessions(
     const ledgerMtimes = ledgerMtimeByTaskId(ledgerDir, name);
     for (const m of ledgerMtimes.values()) {
       if (m > lastActiveMs) lastActiveMs = m;
+    }
+    // (c) Fold this session's generic lane-heartbeat marker mtime (#1317) — the
+    // second generic freshness source, keyed by session, max-folded the same
+    // way. Keeps a non-4-role lane's session live without touching the ledger.
+    const beatMtime = heartbeatMtimes.get(name);
+    if (beatMtime !== undefined && beatMtime > lastActiveMs) {
+      lastActiveMs = beatMtime;
     }
     out.push({ sessionId: name, dir, taskFiles, lastActiveMs, ledgerMtimes });
   }

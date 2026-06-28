@@ -23,6 +23,11 @@ _quarantine*/
 
 # --- Node / Next / Vercel ---
 node_modules/
+# Also ignore a root-level node_modules SYMLINK (the worktree-node-modules-link
+# hook points it at the primary clone). The trailing-slash pattern above matches
+# only a directory, so without this a `git add -A` would stage the symlink and
+# leak a /Users/<name>/ home path. (#1316)
+/node_modules
 .next/
 out/
 .vercel/

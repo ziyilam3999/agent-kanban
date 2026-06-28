@@ -379,6 +379,50 @@ export function detectOrphanBacklog(
     .sort((a, b) => b.openCount - a.openCount);
 }
 
+/**
+ * Blocker statuses that count as RESOLVED — a blocker in any of these no longer
+ * blocks its dependent. Lowercased + trimmed before lookup. This set is
+ * BYTE-IDENTICAL to the resolution set on the ai-brain parallelism gate
+ * (`hooks/sole-lane-parallelization-gate.sh`) so the two sides agree on what
+ * "resolved" means. Today only `completed` is reachable through the typed task
+ * path (`RawTask.status`), but the broader set future-proofs raw data carrying
+ * the other tokens and keeps the two sides symmetric. (#1316)
+ */
+export const RESOLVED_BLOCKER_STATUSES = new Set<string>([
+  "completed",
+  "done",
+  "cancelled",
+  "canceled",
+  "closed",
+]);
+
+/**
+ * PURE: return `blockedBy` with every id whose looked-up status is RESOLVED
+ * removed. An id ABSENT from `statusById` is KEPT.
+ *
+ * DELIBERATE OPPOSITE of the ai-brain parallelism gate
+ * (`hooks/sole-lane-parallelization-gate.sh`) on the absent case — same
+ * resolution SET, opposite absent-case direction, and that asymmetry is
+ * intentional (NOT a bug a code-only reader should "fix"): the GATE treats an
+ * absent blocker as RESOLVED (it's advisory / block-once — a rare false fire is
+ * a cheap nudge the orchestrator still judges). The BOARD keeps an absent
+ * blocker VISIBLE — a human-facing status display must not HIDE a blocker it
+ * cannot prove is resolved: false-"blocked" is merely cosmetic, but
+ * false-"unblocked" actively misleads a human reader. So the board filters ONLY
+ * a blocker that is PRESENT on the board AND resolved. (#1316)
+ */
+export function filterResolvedBlockers(
+  blockedBy: string[],
+  statusById: Map<string, string>
+): string[] {
+  return blockedBy.filter((id) => {
+    const status = statusById.get(id);
+    // Absent from the board → KEEP (fail-safe: never hide an unprovable blocker).
+    if (status === undefined) return true;
+    return !RESOLVED_BLOCKER_STATUSES.has(status.trim().toLowerCase());
+  });
+}
+
 /** Inputs to buildBoard — all already-parsed/derived; generatedAt is passed IN. */
 export interface BuildBoardInput {
   generatedAt: number;
@@ -389,11 +433,29 @@ export interface BuildBoardInput {
 
 /** Assemble the full Board snapshot. Deterministic — no Date.now() inside. */
 export function buildBoard(input: BuildBoardInput): Board {
+  // id → status across ALL tickets on the board (this is the choke point that
+  // holds every ticket across all sessions, so even a cross-session blocker is
+  // resolvable here). Pure + deterministic — no IO, no Date.now().
+  const statusById = new Map<string, string>(
+    input.tickets.map((t) => [t.id, t.status])
+  );
+  // Drop resolved blockers so a ticket blocked ONLY by a COMPLETED ticket no
+  // longer renders "blocked by #X". A blocker ABSENT from the board stays
+  // visible — see filterResolvedBlockers for why the absent case is the
+  // deliberate OPPOSITE of the parallelism gate. (#1316)
+  const tickets = input.tickets.map((t) => {
+    const filtered = filterResolvedBlockers(t.blockedBy, statusById);
+    // filterResolvedBlockers only ever removes ids, so an equal length means
+    // nothing changed → reuse the original object (no needless copy).
+    return filtered.length === t.blockedBy.length
+      ? t
+      : { ...t, blockedBy: filtered };
+  });
   return {
     schema: 1,
     generatedAt: input.generatedAt,
     sessionId: input.sessionId,
     sessions: input.sessions,
-    tickets: input.tickets,
+    tickets,
   };
 }

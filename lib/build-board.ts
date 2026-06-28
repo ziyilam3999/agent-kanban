@@ -252,12 +252,22 @@ function hasPendingExecutionReview(ledgerLines: RawLedgerLine[]): boolean {
 /**
  * Build a single Ticket from a raw task, its (possibly empty) ledger lines, and
  * the task-file mtime (ms epoch). Comments are ordered oldest-first by ts.
+ *
+ * `updatedAt` is the NEWER of the task-file mtime and the optional per-ticket
+ * 3-role ledger mtime (`ledgerMtimeMs`). During a 4-role chain the work appends
+ * to `<ledgerDir>/<session>/<taskId>.jsonl` without touching the task file, so a
+ * task-file-only `updatedAt` goes stale mid-work and the ticket's lane stops
+ * breathing (#1305 — the per-ticket twin of the session-level #1121 fix). Folding
+ * the ledger mtime via `max` keeps the lane lit. NO-OP when `ledgerMtimeMs` is
+ * undefined: `max(mtimeMs, 0) === mtimeMs` (mtimeMs is a positive epoch), so a
+ * ticket with no ledger file behaves exactly as before.
  */
 export function buildTicket(
   rawTask: RawTask,
   ledgerLines: RawLedgerLine[],
   mtimeMs: number,
-  sessionId?: string
+  sessionId?: string,
+  ledgerMtimeMs?: number
 ): Ticket {
   const comments = [...ledgerLines]
     .sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts))
@@ -278,7 +288,7 @@ export function buildTicket(
     status: rawTask.status,
     blockedBy: rawTask.blockedBy ?? [],
     comments,
-    updatedAt: mtimeMs,
+    updatedAt: Math.max(mtimeMs, ledgerMtimeMs ?? 0),
   };
   if (sessionId) ticket.sessionId = sessionId;
   return ticket;

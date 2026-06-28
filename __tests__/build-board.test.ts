@@ -13,7 +13,7 @@ import {
   type RawTask,
   type RawLedgerLine,
 } from "@/lib/build-board";
-import { COLUMNS } from "@/lib/board-schema";
+import { COLUMNS, type Board, type Ticket } from "@/lib/board-schema";
 
 describe("toColumn", () => {
   it("maps completed → done", () => {
@@ -576,5 +576,47 @@ describe("buildBoard", () => {
     expect(board.sessions).toBe(sessions);
     expect(board.tickets).toHaveLength(1);
     expect(COLUMNS).toContain(board.tickets[0].column);
+  });
+});
+
+describe("buildBoard — resolved blockers are dropped (#1316)", () => {
+  const now = 1_700_000_000_000;
+  // Full Ticket fixtures built via the existing baseTask + buildTicket helpers —
+  // no hand-rolled partial shapes (plan-review fold 3).
+  const ticketWith = (over: Partial<RawTask>): Ticket =>
+    buildTicket(baseTask(over), [], now);
+  const board = (tickets: Ticket[]): Board =>
+    buildBoard({ generatedAt: now, sessionId: "sess1234", sessions: [], tickets });
+  const find = (b: Board, id: string): Ticket =>
+    b.tickets.find((t) => t.id === id) as Ticket;
+
+  it("AC-A1: a ticket blocked by a COMPLETED ticket present on the board drops the blocker", () => {
+    const X = ticketWith({ id: "X", blockedBy: ["Y"] });
+    const Y = ticketWith({ id: "Y", status: "completed" });
+    expect(find(board([X, Y]), "X").blockedBy).toEqual([]);
+  });
+
+  it("AC-A2: a ticket blocked by a STILL-OPEN (in_progress) ticket keeps the blocker (no over-filter)", () => {
+    const X = ticketWith({ id: "X", blockedBy: ["Y"] });
+    const Y = ticketWith({ id: "Y", status: "in_progress" });
+    expect(find(board([X, Y]), "X").blockedBy).toEqual(["Y"]);
+  });
+
+  it("AC-A2': a ticket blocked by a PENDING ticket keeps the blocker (no over-filter)", () => {
+    const X = ticketWith({ id: "X", blockedBy: ["Y"] });
+    const Y = ticketWith({ id: "Y", status: "pending" });
+    expect(find(board([X, Y]), "X").blockedBy).toEqual(["Y"]);
+  });
+
+  it("AC-A3: a blocker ABSENT from the board stays visible (board fail-safe — deliberate opposite of the gate)", () => {
+    const X = ticketWith({ id: "X", blockedBy: ["Z"] });
+    expect(find(board([X]), "X").blockedBy).toEqual(["Z"]);
+  });
+
+  it("AC-A4: mixed — completed blocker dropped, pending blocker kept", () => {
+    const X = ticketWith({ id: "X", blockedBy: ["Y", "Z"] });
+    const Y = ticketWith({ id: "Y", status: "completed" });
+    const Z = ticketWith({ id: "Z", status: "pending" });
+    expect(find(board([X, Y, Z]), "X").blockedBy).toEqual(["Z"]);
   });
 });

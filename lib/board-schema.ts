@@ -37,7 +37,13 @@ export interface Ticket {
   column: Column;
   /** Raw task status: pending | in_progress | completed. */
   status: "pending" | "in_progress" | "completed";
-  /** Open task ids this is blocked by (cards render a "blocked" pill when non-empty). */
+  /**
+   * Task ids this is blocked by. Resolved blockers — a blocker PRESENT on the
+   * board whose status is in {completed, done, cancelled, canceled, closed} — are
+   * filtered out at board assembly (`buildBoard` → `filterResolvedBlockers`), so a
+   * non-empty list means "blocked by still-open or not-on-the-board work". Cards
+   * render a "blocked" pill when non-empty. (#1316)
+   */
   blockedBy: string[];
   /** Role audit trail, oldest-first. */
   comments: LedgerComment[];

@@ -16,10 +16,15 @@
 // background sync is never silent even when the hook swallows the courier's exit.
 
 import { execFileSync } from "node:child_process";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { put as realPut } from "@vercel/blob";
-import { appendSyncRecord, defaultSyncLogPath } from "../lib/sync-log";
+import {
+  appendSyncRecord,
+  defaultSyncLogPath,
+  readSyncLog,
+} from "../lib/sync-log";
 
 /** Minimal structural type for the blob `put` so a test can inject a mock. */
 export type PutFn = (
@@ -90,6 +95,28 @@ export function defaultResolveToken(): TokenResolution {
 }
 
 /**
+ * The hash the remote currently holds: newest uploaded|skipped-unchanged record with
+ * a non-null hash, else null. Both results confirm the remote holds that exact hash.
+ * Fail safe toward uploading: first-ever / legacy-hashless / unreadable log → null →
+ * the caller uploads (a wrong skip = a stale remote board; a wrong upload = one wasted
+ * Advanced Op — the asymmetry favors uploading).
+ */
+function lastRemoteHash(logPath: string): string | null {
+  const recs = readSyncLog(logPath); // newest-last
+  for (let i = recs.length - 1; i >= 0; i--) {
+    const r = recs[i];
+    if (
+      (r.result === "uploaded" || r.result === "skipped-unchanged") &&
+      r.hash != null &&
+      r.hash !== ""
+    ) {
+      return r.hash;
+    }
+  }
+  return null; // first-ever upload OR only legacy/hashless records → upload (fail safe)
+}
+
+/**
  * Pure, injectable courier. Returns the intended process exit code (0 = uploaded,
  * non-zero = skipped/failed) and writes EXACTLY ONE sync-log record before returning.
  * No real network / Keychain / blob is touched unless the injected deps do so.
@@ -138,6 +165,30 @@ export async function uploadBoard(deps: UploadDeps): Promise<number> {
   }
 
   const body = fs.readFileSync(boardPath);
+
+  // Content-hash dedup (#1358): a sha256 hex of the EXACT upload bytes. Safe to log
+  // (one-way digest of public board data — not the content, not the token). Skip the
+  // metered `put` when the remote already holds these exact bytes.
+  const hash = crypto.createHash("sha256").update(body).digest("hex");
+  const remoteHash = lastRemoteHash(logPath);
+  if (remoteHash !== null && remoteHash === hash) {
+    // Deliberate success no-op — the remote already holds these exact bytes. The hook
+    // `|| true`-wraps + `exit 0`s regardless; 0 is the honest "nothing to do, all good".
+    appendSyncRecord(
+      {
+        ts: now(),
+        result: "skipped-unchanged",
+        reason: "unchanged",
+        url: null,
+        boardBytes,
+        boardMtime,
+        hash,
+      },
+      logPath
+    );
+    return 0;
+  }
+
   try {
     const { url } = await put("board.json", body, {
       access: "public",
@@ -152,7 +203,15 @@ export async function uploadBoard(deps: UploadDeps): Promise<number> {
     console.log(url);
     console.log(`set BOARD_BLOB_URL=${url} in the Vercel project env`);
     appendSyncRecord(
-      { ts: now(), result: "uploaded", reason, url, boardBytes, boardMtime },
+      {
+        ts: now(),
+        result: "uploaded",
+        reason,
+        url,
+        boardBytes,
+        boardMtime,
+        hash,
+      },
       logPath
     );
     return 0;

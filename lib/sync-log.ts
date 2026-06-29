@@ -1,16 +1,22 @@
 // sync-log.ts — the persistent sync logbook (#1158).
 //
 // One JSONL record per line at data/sync.log (override with SYNC_LOG). The courier
-// writes its outcome here before EVERY exit (uploaded / skipped-no-token / failed),
-// and the hook writes an `export-failed` record when the re-export step fails — so a
-// background sync is NEVER silent. The log stores only url / bytes / mtime / a closed
-// reason-enum — NEVER board content, NEVER the token, NEVER a home path.
+// writes its outcome here before EVERY exit (uploaded / skipped-no-token /
+// skipped-unchanged / failed), and the hook writes an `export-failed` record when the
+// re-export step fails — so a background sync is NEVER silent. The log stores only
+// url / bytes / mtime / a content sha256 hash / a closed reason-enum — NEVER board
+// content, NEVER the token, NEVER a home path (a sha256 hex digest of public board
+// bytes is a one-way digest: not the content, not a secret, not a path).
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-/** Closed outcome enum — exactly these three values, no overlap. */
-export type SyncResult = "uploaded" | "skipped-no-token" | "failed";
+/** Closed outcome enum — exactly these four values, no overlap. */
+export type SyncResult =
+  | "uploaded"
+  | "skipped-no-token"
+  | "skipped-unchanged"
+  | "failed";
 
 /** One line of the sync logbook. */
 export interface SyncRecord {
@@ -20,6 +26,7 @@ export interface SyncRecord {
   url: string | null;
   boardBytes: number | null;
   boardMtime: string | null; // ISO-8601 | null
+  hash?: string | null; // sha256 hex of the uploaded body bytes; absent on legacy/no-hash records
 }
 
 /** The configured sync-log path: `SYNC_LOG` env override, else `data/sync.log`. */

@@ -27,7 +27,18 @@ jest.mock("@vercel/blob", () => ({ put: jest.fn() }));
 
 const FAKE_URL = "https://blob.example.test/board.json";
 const BOARD_BODY = JSON.stringify({ generatedAt: 1, tickets: [] });
-const ENUM = new Set(["uploaded", "skipped-no-token", "failed"]);
+const ENUM = new Set([
+  "uploaded",
+  "skipped-no-token",
+  "skipped-unchanged",
+  "failed",
+]);
+// sha256 of the exact upload bytes — computed the SAME way the impl does, so the
+// tests are self-checking against the real digest.
+const H_BODY = require("node:crypto")
+  .createHash("sha256")
+  .update(BOARD_BODY)
+  .digest("hex");
 
 let root: string;
 let boardPath: string;
@@ -82,6 +93,8 @@ describe("uploadBoard — courier unit (#1158 Layer A, hermetic)", () => {
     expect(recs[0].reason).toBe("env-token");
     expect(recs[0].boardBytes).toBe(Buffer.byteLength(BOARD_BODY));
     expect(typeof recs[0].boardMtime).toBe("string");
+    // #1358: the success record now carries the sha256 of the uploaded bytes.
+    expect(recs[0].hash).toBe(H_BODY);
     assertLogClean(logPath);
   });
 
@@ -166,6 +179,159 @@ describe("uploadBoard — courier unit (#1158 Layer A, hermetic)", () => {
     const r = defaultResolveToken();
     expect(r.token).toBe("SECRET-TOKEN");
     expect(r.reason).toBe("env-token");
+  });
+
+  // ───────────────────────── #1358 skip-if-unchanged (both-ends) ─────────────────────────
+
+  it("CHANGED: prior uploaded hash differs from current body → put called exactly once, new hash recorded", async () => {
+    // Pre-seed an `uploaded` record carrying a DIFFERENT (old) hash.
+    const H_old = "0".repeat(64);
+    writeFileSync(
+      logPath,
+      JSON.stringify({
+        ts: "2026-06-29T00:00:00.000Z",
+        result: "uploaded",
+        reason: "env-token",
+        url: FAKE_URL,
+        boardBytes: 1,
+        boardMtime: "2026-06-29T00:00:00.000Z",
+        hash: H_old,
+      }) + "\n",
+      "utf8"
+    );
+    const put = jest.fn<ReturnType<PutFn>, Parameters<PutFn>>(async () => ({ url: FAKE_URL }));
+    const resolveToken = (): TokenResolution => ({
+      token: "SECRET-TOKEN",
+      reason: "env-token",
+    });
+
+    const code = await uploadBoard({ put, resolveToken, boardPath, logPath });
+
+    expect(code).toBe(0);
+    expect(put).toHaveBeenCalledTimes(1);
+    const recs = readSyncLog(logPath);
+    const newest = recs[recs.length - 1];
+    expect(newest.result).toBe("uploaded");
+    expect(newest.hash).toBe(H_BODY); // the freshly-computed sha256 of the current body
+    expect(newest.hash).not.toBe(H_old);
+    assertLogClean(logPath);
+  });
+
+  it("UNCHANGED: prior hash equals current body hash → put NOT called, `skipped-unchanged` appended, returns 0", async () => {
+    // Pre-seed a record whose hash IS the sha256 of the current BOARD_BODY.
+    writeFileSync(
+      logPath,
+      JSON.stringify({
+        ts: "2026-06-29T00:00:00.000Z",
+        result: "uploaded",
+        reason: "env-token",
+        url: FAKE_URL,
+        boardBytes: Buffer.byteLength(BOARD_BODY),
+        boardMtime: "2026-06-29T00:00:00.000Z",
+        hash: H_BODY,
+      }) + "\n",
+      "utf8"
+    );
+    const put = jest.fn<ReturnType<PutFn>, Parameters<PutFn>>();
+    const resolveToken = (): TokenResolution => ({
+      token: "SECRET-TOKEN",
+      reason: "env-token",
+    });
+
+    const code = await uploadBoard({ put, resolveToken, boardPath, logPath });
+
+    // The metered put is suppressed — the remote already holds these exact bytes.
+    expect(put).toHaveBeenCalledTimes(0);
+    expect(code).toBe(0);
+    const recs = readSyncLog(logPath);
+    const newest = recs[recs.length - 1];
+    expect(newest.result).toBe("skipped-unchanged");
+    expect(newest.reason).toBe("unchanged");
+    expect(newest.url).toBeNull();
+    expect(newest.hash).toBe(H_BODY);
+    assertLogClean(logPath);
+  });
+
+  it("UNCHANGED (variant): a prior `skipped-unchanged` record is also a valid remote-hash source → still skips", async () => {
+    // The remote-hash source accepts skipped-unchanged records too (both confirm remote).
+    writeFileSync(
+      logPath,
+      JSON.stringify({
+        ts: "2026-06-29T00:00:00.000Z",
+        result: "skipped-unchanged",
+        reason: "unchanged",
+        url: null,
+        boardBytes: Buffer.byteLength(BOARD_BODY),
+        boardMtime: "2026-06-29T00:00:00.000Z",
+        hash: H_BODY,
+      }) + "\n",
+      "utf8"
+    );
+    const put = jest.fn<ReturnType<PutFn>, Parameters<PutFn>>();
+    const resolveToken = (): TokenResolution => ({
+      token: "SECRET-TOKEN",
+      reason: "env-token",
+    });
+
+    const code = await uploadBoard({ put, resolveToken, boardPath, logPath });
+
+    expect(put).toHaveBeenCalledTimes(0);
+    expect(code).toBe(0);
+    const recs = readSyncLog(logPath);
+    expect(recs[recs.length - 1].result).toBe("skipped-unchanged");
+    assertLogClean(logPath);
+  });
+
+  it("FIRST-UPLOAD: empty/absent log → put called once, record carries a 64-char sha256 hash", async () => {
+    // logPath does not exist yet (fresh temp root) → lastRemoteHash returns null → upload.
+    const put = jest.fn<ReturnType<PutFn>, Parameters<PutFn>>(async () => ({ url: FAKE_URL }));
+    const resolveToken = (): TokenResolution => ({
+      token: "SECRET-TOKEN",
+      reason: "env-token",
+    });
+
+    const code = await uploadBoard({ put, resolveToken, boardPath, logPath });
+
+    expect(code).toBe(0);
+    expect(put).toHaveBeenCalledTimes(1);
+    const recs = readSyncLog(logPath);
+    const newest = recs[recs.length - 1];
+    expect(newest.result).toBe("uploaded");
+    expect(typeof newest.hash).toBe("string");
+    expect((newest.hash as string).length).toBe(64);
+    expect(newest.hash).toBe(H_BODY);
+    assertLogClean(logPath);
+  });
+
+  it("LEGACY-HASHLESS: prior `uploaded` record with NO hash field → can't confirm unchanged → put called once, hash back-filled", async () => {
+    // A legacy record predating #1358 has no `hash` field → must fail safe to upload.
+    writeFileSync(
+      logPath,
+      JSON.stringify({
+        ts: "2026-06-29T00:00:00.000Z",
+        result: "uploaded",
+        reason: "env-token",
+        url: FAKE_URL,
+        boardBytes: Buffer.byteLength(BOARD_BODY),
+        boardMtime: "2026-06-29T00:00:00.000Z",
+      }) + "\n",
+      "utf8"
+    );
+    const put = jest.fn<ReturnType<PutFn>, Parameters<PutFn>>(async () => ({ url: FAKE_URL }));
+    const resolveToken = (): TokenResolution => ({
+      token: "SECRET-TOKEN",
+      reason: "env-token",
+    });
+
+    const code = await uploadBoard({ put, resolveToken, boardPath, logPath });
+
+    expect(code).toBe(0);
+    expect(put).toHaveBeenCalledTimes(1); // never wrongly skip on legacy data
+    const recs = readSyncLog(logPath);
+    const newest = recs[recs.length - 1];
+    expect(newest.result).toBe("uploaded");
+    expect(newest.hash).toBe(H_BODY); // the new record now carries the hash
+    assertLogClean(logPath);
   });
 
   it("(v) AC-IMPORTABLE: importing the courier under NODE_ENV=test fires neither put nor security", () => {

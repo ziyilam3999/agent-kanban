@@ -79,3 +79,11 @@ jobs:
             exit 1
           fi
           echo "privacy gate OK: no home paths, no tracked board snapshots."
+      # The synthetic sample is the ONE tracked board file, so the gate above can't see
+      # a real capture written OVER it. Shape-guard: the real board is always dozens of
+      # tickets; the synthetic sample stays small. Caveat: a real capture <=12 tickets
+      # would slip through — the size bound is the honest, cheap signal.
+      - name: Sample fixture must stay synthetic-sized (no real board captures)
+        shell: bash
+        run: |
+          node -e 'const d=require("./data/board.sample.json"); const n=(d.tickets||[]).length; if(n>12){console.error(`sample-guard FAIL: data/board.sample.json has ${n} tickets - looks like a REAL board capture (synthetic sample must stay <=12). Real captures go to gitignored/scratch paths, never over the tracked fixture.`);process.exit(1)} console.log(`sample-guard OK: ${n} tickets (synthetic-sized)`)'

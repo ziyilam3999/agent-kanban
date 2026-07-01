@@ -41,3 +41,6 @@ playwright-report/
 
 # --- OS ---
 .DS_Store
+
+# --- git worktrees (intentional, e.g. live-deploy) — never tracked ---
+.worktrees/

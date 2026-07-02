@@ -1,11 +1,12 @@
-// blob-auth.ts — the courier's injectable auth resolver (#1050).
+// blob-auth.ts — the courier's injectable auth resolver (#1050, #1405).
 //
 // SINGLE OWNER of all Blob credential resolution. The courier uploads with
-// short-lived OIDC credentials first (env, else a `vercel env pull`ed token file
-// that self-refreshes near expiry), and only falls back to the long-lived RW
-// token (env, else macOS Keychain) when no OIDC path works. Every arm yields a
-// stable, value-free `reason` token so data/sync.log shows which auth path
-// served each upload. NEVER prints, logs, or throws a credential value.
+// short-lived OIDC credentials ONLY (env, else a `vercel env pull`ed token file
+// that self-refreshes near expiry) — the long-lived RW token was revoked
+// server-side 2026-07-02 and its resolution arms were removed (#1405). Every
+// arm yields a stable, value-free `reason` token so data/sync.log shows which
+// auth path served each upload. NEVER prints, logs, or throws a credential
+// value.
 //
 // Resolution order (first match wins):
 //   1. env VERCEL_OIDC_TOKEN + a store id (env BLOB_STORE_ID, else the token
@@ -22,20 +23,9 @@
 //      "oidc-refreshed"; unparseable `exp` → one refresh attempt, else
 //      upload-anyway as "oidc-file-unverified" (F6 — the server is the real
 //      validator; a rejection lands as an honest `failed` record).
-//   3. env BLOB_READ_WRITE_TOKEN → mode "rw", reason "rw-env" /
-//      "rw-env-fallback" (see OIDC-signal below).
-//   4. macOS Keychain BLOB_READ_WRITE_TOKEN → mode "rw", reason "rw-keychain" /
-//      "rw-keychain-fallback".
-//   5. Nothing → mode "none" with the most precise failure reason
-//      ("oidc-refresh-failed" | "oidc-vars-missing" | "keychain-absent" |
-//      "keychain-unreachable-or-absent").
-//
-// OIDC-signal (B2 fallback semantics): env VERCEL_OIDC_TOKEN set OR the token
-// file exists. When an rw arm serves the credential AND OIDC-signal is true,
-// resolution FELL THROUGH a configured-but-broken OIDC path → the "-fallback"
-// reason variant (the courier alerts on it, edge-triggered). With no
-// OIDC-signal (e.g. CI exporting only BLOB_READ_WRITE_TOKEN) the rw arm is
-// deliberate → plain reason, no alert.
+//   3. Nothing → mode "none" with the precise OIDC failure reason
+//      ("oidc-refresh-failed" | "oidc-vars-missing") — both arm-2 failure
+//      branches always set one.
 //
 // Refresh policy: refresh ONLY when exp - now < skew (default 900 s, override
 // via OIDC_REFRESH_SKEW_S). With ~12 h token validity that is ≤2 CLI calls/day
@@ -48,19 +38,12 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-/** The resolved credential: exactly one of three modes, each with a stable reason. */
+/** The resolved credential: exactly one of two modes, each with a stable reason. */
 export type BlobAuth =
   | { mode: "oidc"; oidcToken: string; storeId: string; reason: string }
-  | { mode: "rw"; token: string; reason: string }
   | { mode: "none"; reason: string };
 
-/** Keychain read outcome: token ("" if absent) + a precise machine reason. */
-export interface KeychainResolution {
-  token: string;
-  reason: string; // keychain-token | keychain-absent | keychain-unreachable-or-absent
-}
-
-/** Injectable dependencies — tests inject ALL of these (hermetic: no network, Keychain, or CLI). */
+/** Injectable dependencies — tests inject ALL of these (hermetic: no network or CLI). */
 export interface BlobAuthDeps {
   env: Record<string, string | undefined>;
   /** Read a file as utf8, or null when missing/unreadable. */
@@ -70,7 +53,6 @@ export interface BlobAuthDeps {
   now: () => number;
   /** Run `vercel env pull <tokenFile>` (temp-file + rename). True on success. */
   pullEnv: (tokenFile: string) => boolean;
-  keychainRead: () => KeychainResolution;
   /** Default token-file path when OIDC_TOKEN_FILE is unset (injectable so tests
    * can prove the env override is honored without touching the real repo root). */
   defaultTokenFile: string;
@@ -142,32 +124,6 @@ export function defaultPullEnv(tokenFile: string): boolean {
   }
 }
 
-/**
- * Resolve the RW token from the macOS Keychain — logic moved VERBATIM from
- * upload-board.ts's former defaultResolveToken (F3). Classifies the outcome
- * into a precise, value-free reason: hit → keychain-token; clean
- * errSecItemNotFound (exit 44) or empty output → keychain-absent; any other
- * non-zero / unrunnable `security` → keychain-unreachable-or-absent. We do NOT
- * over-claim locked-vs-missing from a background shell (not reliably knowable).
- */
-export function defaultKeychainRead(): KeychainResolution {
-  try {
-    const out = execFileSync(
-      "security",
-      ["find-generic-password", "-s", "BLOB_READ_WRITE_TOKEN", "-w"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
-    );
-    const token = out.trim();
-    if (token !== "") return { token, reason: "keychain-token" };
-    return { token: "", reason: "keychain-absent" };
-  } catch (err) {
-    // errSecItemNotFound → `security` exits 44: a clean "not in the keychain".
-    const status = (err as { status?: number } | null)?.status;
-    if (status === 44) return { token: "", reason: "keychain-absent" };
-    return { token: "", reason: "keychain-unreachable-or-absent" };
-  }
-}
-
 function defaultDeps(): BlobAuthDeps {
   return {
     env: process.env as Record<string, string | undefined>,
@@ -181,7 +137,6 @@ function defaultDeps(): BlobAuthDeps {
     fileExists: (p) => fs.existsSync(p),
     now: () => Math.floor(Date.now() / 1000),
     pullEnv: defaultPullEnv,
-    keychainRead: defaultKeychainRead,
     defaultTokenFile: DEFAULT_TOKEN_FILE,
   };
 }
@@ -284,7 +239,7 @@ function resolveFromFile(
 }
 
 /**
- * Resolve the Blob credential through the 5 arms (module doc above). Call with
+ * Resolve the Blob credential through the arms (module doc above). Call with
  * no args in production; tests inject every dep. Never throws; never logs.
  */
 export function defaultResolveBlobAuth(overrides: Partial<BlobAuthDeps> = {}): BlobAuth {
@@ -306,27 +261,9 @@ export function defaultResolveBlobAuth(overrides: Partial<BlobAuthDeps> = {}): B
   // Arm 2: the token file (also covers arm 1's file-supplied store id — F2 fall-through).
   const arm2 = resolveFromFile(deps, tokenFile, skewS, envOidcToken);
   if (arm2.auth) return arm2.auth;
-  const oidcFailReason = arm2.failReason;
 
-  // B2 OIDC-signal, evaluated AFTER any bootstrap pull may have created the file.
-  const oidcSignal = envOidcToken !== null || deps.fileExists(tokenFile);
-
-  // Arm 3: env RW token.
-  const rwEnv = nonEmpty(env.BLOB_READ_WRITE_TOKEN);
-  if (rwEnv) {
-    return { mode: "rw", token: rwEnv, reason: oidcSignal ? "rw-env-fallback" : "rw-env" };
-  }
-
-  // Arm 4: Keychain RW token.
-  const kc = deps.keychainRead();
-  if (kc.token !== "") {
-    return {
-      mode: "rw",
-      token: kc.token,
-      reason: oidcSignal ? "rw-keychain-fallback" : "rw-keychain",
-    };
-  }
-
-  // Arm 5: nothing — the OIDC failure is the primary-path diagnosis when present.
-  return { mode: "none", reason: oidcFailReason || kc.reason };
+  // Arm 3: nothing — the OIDC failure is the diagnosis (both arm-2 failure
+  // branches always set a non-empty failReason: oidc-refresh-failed /
+  // oidc-vars-missing).
+  return { mode: "none", reason: arm2.failReason };
 }

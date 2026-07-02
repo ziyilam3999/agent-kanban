@@ -1,17 +1,16 @@
-// blob-auth.test.ts — hermetic unit tests for the courier's auth resolver (#1050).
+// blob-auth.test.ts — hermetic unit tests for the courier's auth resolver
+// (#1050, #1405 — OIDC-only after the RW-token arms were removed).
 //
 // Every dep is injected (env / readFile / fileExists / now / pullEnv /
-// keychainRead / defaultTokenFile) — NO real network, Keychain, CLI, or process
-// env. One positive fixture PER resolution arm (per-disjunct rule). All JWTs and
-// store ids are synthetic, built in-test — never real credential material.
+// defaultTokenFile) — NO real network, CLI, or process env. One positive
+// fixture PER resolution arm (per-disjunct rule). All JWTs and store ids are
+// synthetic, built in-test — never real credential material.
 
 import {
   decodeJwtExp,
-  defaultKeychainRead,
   defaultResolveBlobAuth,
   parseDotenv,
   type BlobAuthDeps,
-  type KeychainResolution,
 } from "@/scripts/blob-auth";
 
 const NOW_S = 1_800_000_000; // fixed synthetic clock (seconds)
@@ -43,11 +42,9 @@ function makeDeps(opts: {
   env?: Record<string, string | undefined>;
   files?: Record<string, string>;
   pullResult?: boolean | ((tokenFile: string) => boolean);
-  keychain?: KeychainResolution;
 }): {
   deps: Partial<BlobAuthDeps>;
   pullEnv: jest.Mock;
-  keychainRead: jest.Mock;
   files: Record<string, string>;
 } {
   const files = { ...(opts.files ?? {}) };
@@ -58,9 +55,6 @@ function makeDeps(opts: {
         : opts.pullResult ?? false;
     return r;
   });
-  const keychainRead = jest.fn(
-    (): KeychainResolution => opts.keychain ?? { token: "", reason: "keychain-absent" }
-  );
   return {
     deps: {
       env: { OIDC_TOKEN_FILE: TOKEN_FILE, ...(opts.env ?? {}) },
@@ -68,11 +62,9 @@ function makeDeps(opts: {
       fileExists: (p: string) => p in files,
       now: () => NOW_S,
       pullEnv,
-      keychainRead,
       defaultTokenFile: DEFAULT_FILE,
     },
     pullEnv,
-    keychainRead,
     files,
   };
 }
@@ -314,98 +306,25 @@ describe("defaultResolveBlobAuth — B1 hermeticity fence (AC-6, both ends)", ()
   });
 });
 
-describe("defaultResolveBlobAuth — rw arms + B2 fallback semantics", () => {
-  const RW = "rw-secret-synthetic";
-
-  it("rw-env WITH OIDC-signal (token file exists but is broken) → rw-env-fallback", () => {
+describe("defaultResolveBlobAuth — mode none (#1405: no RW arms to fall through to)", () => {
+  it("nothing anywhere → mode none with the precise OIDC diagnosis (no OIDC configured at all)", () => {
+    // No OIDC config: no env token, no file, bootstrap pull fails → the OIDC
+    // diagnosis (oidc-refresh-failed) is the final reason — there is no
+    // further arm to consult.
     const kit = makeDeps({
-      env: { BLOB_READ_WRITE_TOKEN: RW },
-      files: { [TOKEN_FILE]: "UNRELATED=1\n" }, // file exists → OIDC-signal, vars missing
-    });
-    const auth = defaultResolveBlobAuth(kit.deps);
-    expect(auth).toEqual({ mode: "rw", token: RW, reason: "rw-env-fallback" });
-  });
-
-  it("rw-env with NO OIDC-signal (no env token, no file, bootstrap pull fails) → plain rw-env", () => {
-    const kit = makeDeps({
-      env: { BLOB_READ_WRITE_TOKEN: RW },
       files: {},
       pullResult: false,
     });
     const auth = defaultResolveBlobAuth(kit.deps);
-    expect(auth).toEqual({ mode: "rw", token: RW, reason: "rw-env" });
+    expect(auth).toEqual({ mode: "none", reason: "oidc-refresh-failed" });
   });
 
-  it("rw-keychain WITH OIDC-signal → rw-keychain-fallback", () => {
+  it("broken token file (vars missing) → mode none / oidc-vars-missing — never any other mode", () => {
     const kit = makeDeps({
       files: { [TOKEN_FILE]: "UNRELATED=1\n" },
-      keychain: { token: RW, reason: "keychain-token" },
     });
     const auth = defaultResolveBlobAuth(kit.deps);
-    expect(auth).toEqual({ mode: "rw", token: RW, reason: "rw-keychain-fallback" });
-  });
-
-  it("rw-keychain with NO OIDC-signal → plain rw-keychain", () => {
-    const kit = makeDeps({
-      files: {},
-      pullResult: false,
-      keychain: { token: RW, reason: "keychain-token" },
-    });
-    const auth = defaultResolveBlobAuth(kit.deps);
-    expect(auth).toEqual({ mode: "rw", token: RW, reason: "rw-keychain" });
-  });
-
-  it("nothing anywhere → mode none with the keychain's precise reason when no OIDC was configured…", () => {
-    // No OIDC config at all: no env token, no file, bootstrap pull fails →
-    // the OIDC diagnosis (oidc-refresh-failed) is still the primary-path reason.
-    const kit = makeDeps({
-      files: {},
-      pullResult: false,
-      keychain: { token: "", reason: "keychain-unreachable-or-absent" },
-    });
-    const auth = defaultResolveBlobAuth(kit.deps);
-    expect(auth.mode).toBe("none");
-    expect(auth.reason).toBe("oidc-refresh-failed");
-    expect(kit.keychainRead).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("defaultKeychainRead (moved verbatim from upload-board — F3)", () => {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const cp = require("node:child_process");
-
-  afterEach(() => jest.restoreAllMocks());
-
-  it("security returns a token → keychain-token", () => {
-    jest.spyOn(cp, "execFileSync").mockReturnValue("  kc-secret-synthetic  \n");
-    expect(defaultKeychainRead()).toEqual({
-      token: "kc-secret-synthetic",
-      reason: "keychain-token",
-    });
-  });
-
-  it("security exit 44 (errSecItemNotFound) → keychain-absent", () => {
-    jest.spyOn(cp, "execFileSync").mockImplementation(() => {
-      const err = new Error("not found") as Error & { status: number };
-      err.status = 44;
-      throw err;
-    });
-    expect(defaultKeychainRead()).toEqual({ token: "", reason: "keychain-absent" });
-  });
-
-  it("security empty output → keychain-absent", () => {
-    jest.spyOn(cp, "execFileSync").mockReturnValue("");
-    expect(defaultKeychainRead()).toEqual({ token: "", reason: "keychain-absent" });
-  });
-
-  it("any other failure → keychain-unreachable-or-absent", () => {
-    jest.spyOn(cp, "execFileSync").mockImplementation(() => {
-      throw new Error("boom");
-    });
-    expect(defaultKeychainRead()).toEqual({
-      token: "",
-      reason: "keychain-unreachable-or-absent",
-    });
+    expect(auth).toEqual({ mode: "none", reason: "oidc-vars-missing" });
   });
 });
 

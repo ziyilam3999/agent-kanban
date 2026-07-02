@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
-# on-task-change.sh — OPT-IN local sync hook (NOT auto-installed).
+# on-task-change.sh — the local board-sync hook.
 #
-# Wire this as a PostToolUse hook so the board re-syncs whenever task state changes:
-# it re-exports data/board.json locally and then UNCONDITIONALLY runs the courier,
-# which owns token resolution + writes its own outcome record to data/sync.log
-# (uploaded / skipped-no-token / failed). With a reachable token (env or Keychain)
-# it genuinely uploads; with no token it logs a precise `skipped-no-token` and the
-# hook STILL exits 0 (PostToolUse contract). Nothing is silent — every attempt
-# leaves a sync.log record. Never prints secrets.
+# WIRING SOURCE OF TRUTH: the global PostToolUse hook entry in ~/.claude/settings.json
+# (matcher TaskCreate|TaskUpdate) whose command is the absolute path to this script.
+# On the operator machine it IS wired there and fires on every task change; on a
+# fresh clone it is inert until that settings.json entry is added (see README,
+# "Live sync — opt-in PostToolUse hook").
 #
-# Registration: see README ("Live sync — opt-in PostToolUse hook").
+# The hook re-exports data/board.json locally and then UNCONDITIONALLY runs the
+# courier, which owns credential resolution (OIDC-first, RW fallback — see
+# scripts/blob-auth.ts) + writes its own outcome record to data/sync.log
+# (uploaded / skipped-no-token / failed). With a reachable credential it genuinely
+# uploads; with none it logs a precise `skipped-no-token` and the hook STILL exits 0
+# (PostToolUse contract). Nothing is silent — every attempt leaves a sync.log
+# record. Never prints secrets.
 
 set -euo pipefail
 

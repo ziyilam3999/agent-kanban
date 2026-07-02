@@ -4,12 +4,15 @@
 // Reads data/board.json (produced by export:board) and uploads it to Vercel Blob
 // at the stable pathname "board.json" (overwrite-in-place, near-zero CDN cache so
 // 1.5s polling sees fresh cards). Prints ONLY the resulting blob URL + a one-line
-// env hint — NEVER the token.
+// env hint — NEVER a credential.
 //
-// Token resolution (in order):
-//   1. BLOB_READ_WRITE_TOKEN env var  (CI / non-Mac override)
-//   2. macOS Keychain: security find-generic-password -s BLOB_READ_WRITE_TOKEN -w
-// The token is never printed, never written to a file, never put in an error trace.
+// Auth (#1050): ALL credential resolution lives in scripts/blob-auth.ts —
+// OIDC-first (short-lived, self-refreshing via `vercel env pull`), long-lived
+// RW token (env / macOS Keychain) as the labeled fallback. A SUCCESSFUL upload
+// that had to fall back to the RW token on an OIDC-configured machine fires an
+// out-of-band notification (edge-triggered — B2): a silent success-path
+// fallback is exactly the #43 log-only anti-pattern, and it would otherwise
+// surface only on the day the operator revokes the RW token.
 //
 // The courier OWNS its outcome record: it writes a data/sync.log line (uploaded /
 // skipped-no-token / failed) BEFORE every exit, success AND non-zero (#1158) — so a
@@ -20,6 +23,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { put as realPut } from "@vercel/blob";
+import { defaultResolveBlobAuth, type BlobAuth } from "./blob-auth";
 import {
   appendSyncRecord,
   defaultSyncLogPath,
@@ -27,13 +31,18 @@ import {
   type SyncRecord,
 } from "../lib/sync-log";
 
-/** Minimal structural type for the blob `put` so a test can inject a mock. */
+/** Minimal structural type for the blob `put` so a test can inject a mock.
+ * In "oidc" mode the courier passes oidcToken+storeId and NO `token` key —
+ * the SDK's implementation prefers an explicit `token` over OIDC, so passing
+ * both would silently defeat OIDC (verified against @vercel/blob 2.4.1). */
 export type PutFn = (
   pathname: string,
   body: Buffer,
   opts: {
     access: "public";
-    token: string;
+    token?: string;
+    oidcToken?: string;
+    storeId?: string;
     addRandomSuffix: boolean;
     cacheControlMaxAge: number;
     allowOverwrite: boolean;
@@ -41,19 +50,13 @@ export type PutFn = (
   }
 ) => Promise<{ url: string }>;
 
-/** Token-resolution outcome: the token ("" if absent) + a precise machine reason. */
-export interface TokenResolution {
-  token: string;
-  reason: string; // env-token | keychain-token | keychain-absent | keychain-unreachable-or-absent
-}
-
 /** Injectable dependencies for the pure courier unit (hermetic in tests). */
 export interface UploadDeps {
   put: PutFn;
-  resolveToken: () => TokenResolution;
+  resolveAuth: () => BlobAuth;
   boardPath: string;
   logPath: string;
-  /** Out-of-band failure alert (default: macOS notification). Injectable for tests. */
+  /** Out-of-band alert (default: macOS notification). Injectable for tests. */
   notify?: (title: string, message: string) => void;
 }
 
@@ -122,45 +125,39 @@ function maybeAlertOnFailureStreak(
   }
 }
 
-const TOKEN_HELP = [
-  "upload-board: no Blob token found.",
-  "  Store it in the macOS Keychain (recommended — never touches a file):",
-  '    security add-generic-password -a "$USER" -s BLOB_READ_WRITE_TOKEN -w',
-  "  …then paste the token at the prompt. Or, for CI / non-Mac, export it:",
-  "    export BLOB_READ_WRITE_TOKEN=...",
-  "  See .env.example for the full note.",
-].join("\n");
+/** An `uploaded` record served by an rw arm that FELL THROUGH a configured OIDC path. */
+function isRwFallbackReason(reason: string): boolean {
+  return reason === "rw-env-fallback" || reason === "rw-keychain-fallback";
+}
 
 /**
- * Resolve the Blob read-write token from env, else macOS Keychain — and classify
- * the outcome into a precise, value-free `reason` token. env present → env-token;
- * keychain hit → keychain-token; clean errSecItemNotFound (exit 44) or empty output
- * → keychain-absent; any other non-zero / unrunnable `security` → unreachable. We do
- * NOT over-claim locked-vs-missing from a background shell (not reliably knowable).
+ * B2 edge rule: alert iff the newest PRIOR `uploaded` record does NOT carry an
+ * rw-*-fallback reason. Interleaved `skipped-unchanged` / `failed` /
+ * `skipped-no-token` records do not reset the edge, so a long OIDC outage
+ * alerts exactly once; an `oidc-*` upload in between re-arms it (per-outage
+ * semantics). F9: NO prior `uploaded` record at all (first-ever upload or a
+ * truncated log) counts as an edge → alert.
  */
-export function defaultResolveToken(): TokenResolution {
-  const fromEnv = process.env.BLOB_READ_WRITE_TOKEN;
-  if (fromEnv && fromEnv.trim() !== "") {
-    return { token: fromEnv.trim(), reason: "env-token" };
+function newestPriorUploadedIsFallback(priorRecords: SyncRecord[]): boolean {
+  for (let i = priorRecords.length - 1; i >= 0; i--) {
+    if (priorRecords[i].result === "uploaded") {
+      return isRwFallbackReason(priorRecords[i].reason);
+    }
   }
-  try {
-    const out = execFileSync(
-      "security",
-      ["find-generic-password", "-s", "BLOB_READ_WRITE_TOKEN", "-w"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
-    );
-    const token = out.trim();
-    if (token !== "") return { token, reason: "keychain-token" };
-    return { token: "", reason: "keychain-absent" };
-  } catch (err) {
-    // errSecItemNotFound → `security` exits 44: a clean "not in the keychain".
-    const status = (err as { status?: number } | null)?.status;
-    if (status === 44) return { token: "", reason: "keychain-absent" };
-    // Any other failure (not on macOS, background false-negative, locked) — we can't
-    // honestly distinguish, so record the most precise non-over-claiming token.
-    return { token: "", reason: "keychain-unreachable-or-absent" };
-  }
+  return false; // F9: no prior uploaded record → treat as an edge → alert
 }
+
+const TOKEN_HELP = [
+  "upload-board: no Blob credential found.",
+  "  OIDC (primary — short-lived, self-refreshing): from the linked repo root run",
+  "    vercel env pull .env.vercel-oidc.local --yes",
+  "  …the courier then refreshes it automatically near expiry (overrides:",
+  "  OIDC_TOKEN_FILE, OIDC_REFRESH_SKEW_S).",
+  "  RW fallback (CI / non-Mac): export BLOB_READ_WRITE_TOKEN, or store it in the",
+  "  macOS Keychain:",
+  '    security add-generic-password -a "$USER" -s BLOB_READ_WRITE_TOKEN -w',
+  "  See .env.example for the full note.",
+].join("\n");
 
 /**
  * The hash the remote currently holds: newest uploaded|skipped-unchanged record with
@@ -169,10 +166,9 @@ export function defaultResolveToken(): TokenResolution {
  * the caller uploads (a wrong skip = a stale remote board; a wrong upload = one wasted
  * Advanced Op — the asymmetry favors uploading).
  */
-function lastRemoteHash(logPath: string): string | null {
-  const recs = readSyncLog(logPath); // newest-last
-  for (let i = recs.length - 1; i >= 0; i--) {
-    const r = recs[i];
+function lastRemoteHash(records: SyncRecord[]): string | null {
+  for (let i = records.length - 1; i >= 0; i--) {
+    const r = records[i];
     if (
       (r.result === "uploaded" || r.result === "skipped-unchanged") &&
       r.hash != null &&
@@ -187,10 +183,10 @@ function lastRemoteHash(logPath: string): string | null {
 /**
  * Pure, injectable courier. Returns the intended process exit code (0 = uploaded,
  * non-zero = skipped/failed) and writes EXACTLY ONE sync-log record before returning.
- * No real network / Keychain / blob is touched unless the injected deps do so.
+ * No real network / Keychain / CLI / blob is touched unless the injected deps do so.
  */
 export async function uploadBoard(deps: UploadDeps): Promise<number> {
-  const { put, resolveToken, boardPath, logPath } = deps;
+  const { put, resolveAuth, boardPath, logPath } = deps;
   const notify = deps.notify ?? defaultNotify;
   const now = (): string => new Date().toISOString();
 
@@ -217,31 +213,33 @@ export async function uploadBoard(deps: UploadDeps): Promise<number> {
   const boardBytes = stat.size;
   const boardMtime = stat.mtime.toISOString();
 
-  const { token, reason } = resolveToken();
-  if (!token) {
+  const auth = resolveAuth();
+  if (auth.mode === "none") {
     console.error(TOKEN_HELP);
     appendSyncRecord(
       {
         ts: now(),
         result: "skipped-no-token",
-        reason,
+        reason: auth.reason,
         url: null,
         boardBytes,
         boardMtime,
       },
       logPath
     );
-    maybeAlertOnFailureStreak(logPath, notify, reason);
+    maybeAlertOnFailureStreak(logPath, notify, auth.reason);
     return 1;
   }
 
   const body = fs.readFileSync(boardPath);
 
   // Content-hash dedup (#1358): a sha256 hex of the EXACT upload bytes. Safe to log
-  // (one-way digest of public board data — not the content, not the token). Skip the
-  // metered `put` when the remote already holds these exact bytes.
+  // (one-way digest of public board data — not the content, not a credential). Skip
+  // the metered `put` when the remote already holds these exact bytes. The single
+  // pre-append log read also serves the B2 fallback edge rule below (no new I/O).
+  const priorRecords = readSyncLog(logPath);
   const hash = crypto.createHash("sha256").update(body).digest("hex");
-  const remoteHash = lastRemoteHash(logPath);
+  const remoteHash = lastRemoteHash(priorRecords);
   if (remoteHash !== null && remoteHash === hash) {
     // Deliberate success no-op — the remote already holds these exact bytes. The hook
     // `|| true`-wraps + `exit 0`s regardless; 0 is the honest "nothing to do, all good".
@@ -261,23 +259,32 @@ export async function uploadBoard(deps: UploadDeps): Promise<number> {
   }
 
   try {
-    const { url } = await put("board.json", body, {
-      access: "public",
-      token,
+    const baseOpts = {
+      access: "public" as const,
       addRandomSuffix: false,
       cacheControlMaxAge: 0,
       allowOverwrite: true,
       contentType: "application/json",
-    });
+    };
+    // oidc mode passes NO `token` key: the SDK prefers an explicit `token` over
+    // OIDC (verified in 2.4.1's resolveBlobAuth), so including it would silently
+    // defeat OIDC. rw mode passes `token` exactly as before.
+    const { url } = await put(
+      "board.json",
+      body,
+      auth.mode === "oidc"
+        ? { ...baseOpts, oidcToken: auth.oidcToken, storeId: auth.storeId }
+        : { ...baseOpts, token: auth.token }
+    );
 
-    // ONLY the URL + the one-line env hint. No token, ever.
+    // ONLY the URL + the one-line env hint. No credential, ever.
     console.log(url);
     console.log(`set BOARD_BLOB_URL=${url} in the Vercel project env`);
     appendSyncRecord(
       {
         ts: now(),
         result: "uploaded",
-        reason,
+        reason: auth.reason,
         url,
         boardBytes,
         boardMtime,
@@ -285,6 +292,20 @@ export async function uploadBoard(deps: UploadDeps): Promise<number> {
       },
       logPath
     );
+
+    // B2: a SUCCESSFUL upload that fell back to the RW token is invisible to the
+    // failure-streak alert (it's a success record) — fire the out-of-band channel
+    // on the EDGE only. Message carries reason tokens, never values.
+    if (isRwFallbackReason(auth.reason) && !newestPriorUploadedIsFallback(priorRecords)) {
+      try {
+        notify(
+          "agent-kanban board sync",
+          `Board sync fell back to the RW token (${auth.reason}) — the OIDC path is broken; see data/sync.log.`
+        );
+      } catch {
+        /* best-effort — an alert failure must never break the courier */
+      }
+    }
     return 0;
   } catch (err: unknown) {
     // Print only the message — never the stack (could echo request internals). Log
@@ -312,7 +333,7 @@ export async function uploadBoard(deps: UploadDeps): Promise<number> {
 async function main(): Promise<void> {
   const code = await uploadBoard({
     put: realPut as unknown as PutFn,
-    resolveToken: defaultResolveToken,
+    resolveAuth: () => defaultResolveBlobAuth(),
     boardPath: process.env.OUT || path.join("data", "board.json"),
     logPath: defaultSyncLogPath(),
   });

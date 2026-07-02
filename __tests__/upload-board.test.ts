@@ -7,8 +7,9 @@
 //
 // #1050: auth resolution moved to scripts/blob-auth.ts (its unit tests live in
 // blob-auth.test.ts); this file injects ready-made BlobAuth values and covers the
-// courier's mode branching (oidc passes NO `token` key — AC-3), the failure-streak
-// alert (AC-4), and the B2 edge-triggered rw-fallback alert (AC-5).
+// courier's put options (oidc passes NO `token` key — AC-3) and the failure-streak
+// alert (AC-4). #1405 removed the RW arms and the rw-fallback alert, so all
+// fixtures here are oidc-mode or none-mode.
 
 import {
   mkdtempSync,
@@ -44,7 +45,6 @@ const H_BODY = require("node:crypto")
   .digest("hex");
 const H_OLD = "0".repeat(64);
 
-const RW_AUTH: BlobAuth = { mode: "rw", token: "SECRET-TOKEN", reason: "rw-env" };
 const OIDC_AUTH: BlobAuth = {
   mode: "oidc",
   oidcToken: "synthetic.oidc.jwt",
@@ -56,7 +56,6 @@ const NONE_AUTH: BlobAuth = { mode: "none", reason: "oidc-refresh-failed" };
 let root: string;
 let boardPath: string;
 let logPath: string;
-const savedToken = process.env.BLOB_READ_WRITE_TOKEN;
 const savedOut = process.env.OUT;
 
 beforeEach(() => {
@@ -69,8 +68,6 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
   jest.restoreAllMocks();
-  if (savedToken === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
-  else process.env.BLOB_READ_WRITE_TOKEN = savedToken;
   if (savedOut === undefined) delete process.env.OUT;
   else process.env.OUT = savedOut;
 });
@@ -108,9 +105,9 @@ function assertLogClean(path: string): void {
 }
 
 describe("uploadBoard — courier unit (#1158 Layer A, hermetic)", () => {
-  it("(i) happy path (rw): auth present + put resolves → put called once + `uploaded` record", async () => {
+  it("(i) happy path: auth present + put resolves → put called once + `uploaded` record", async () => {
     const put = jest.fn<ReturnType<PutFn>, Parameters<PutFn>>(async () => ({ url: FAKE_URL }));
-    const resolveAuth = jest.fn<BlobAuth, []>(() => RW_AUTH);
+    const resolveAuth = jest.fn<BlobAuth, []>(() => OIDC_AUTH);
 
     const code = await uploadBoard({ put, resolveAuth, boardPath, logPath });
 
@@ -120,7 +117,7 @@ describe("uploadBoard — courier unit (#1158 Layer A, hermetic)", () => {
     expect(recs).toHaveLength(1);
     expect(recs[0].result).toBe("uploaded");
     expect(recs[0].url).toBe(FAKE_URL);
-    expect(recs[0].reason).toBe("rw-env");
+    expect(recs[0].reason).toBe("oidc-file");
     expect(recs[0].boardBytes).toBe(Buffer.byteLength(BOARD_BODY));
     expect(typeof recs[0].boardMtime).toBe("string");
     // #1358: the success record now carries the sha256 of the uploaded bytes.
@@ -150,13 +147,13 @@ describe("uploadBoard — courier unit (#1158 Layer A, hermetic)", () => {
     const okPut = jest.fn<ReturnType<PutFn>, Parameters<PutFn>>(async () => ({ url: FAKE_URL }));
     await uploadBoard({
       put: okPut,
-      resolveAuth: () => RW_AUTH,
+      resolveAuth: () => OIDC_AUTH,
       boardPath,
       logPath,
     });
     await uploadBoard({
       put: jest.fn<ReturnType<PutFn>, Parameters<PutFn>>(),
-      resolveAuth: () => ({ mode: "none", reason: "keychain-absent" }),
+      resolveAuth: () => ({ mode: "none", reason: "oidc-vars-missing" }),
       boardPath,
       logPath,
     });
@@ -171,7 +168,7 @@ describe("uploadBoard — courier unit (#1158 Layer A, hermetic)", () => {
       throw new TypeError("network exploded with SECRET-TOKEN inside");
     });
 
-    const code = await uploadBoard({ put, resolveAuth: () => RW_AUTH, boardPath, logPath });
+    const code = await uploadBoard({ put, resolveAuth: () => OIDC_AUTH, boardPath, logPath });
 
     expect(code).toBe(1);
     const recs = readSyncLog(logPath);
@@ -216,17 +213,6 @@ describe("uploadBoard — courier unit (#1158 Layer A, hermetic)", () => {
     assertLogClean(logPath);
   });
 
-  it("rw mode (CI-path regression guard): put receives `token`, no oidcToken/storeId", async () => {
-    const put = jest.fn<ReturnType<PutFn>, Parameters<PutFn>>(async () => ({ url: FAKE_URL }));
-
-    await uploadBoard({ put, resolveAuth: () => RW_AUTH, boardPath, logPath });
-
-    const opts = put.mock.calls[0][2];
-    expect(opts.token).toBe("SECRET-TOKEN");
-    expect(opts).not.toHaveProperty("oidcToken");
-    expect(opts).not.toHaveProperty("storeId");
-  });
-
   it("AC-4 failure streak: 3 consecutive OIDC-reason failures → injected notify fired", async () => {
     writeFileSync(
       logPath,
@@ -249,101 +235,16 @@ describe("uploadBoard — courier unit (#1158 Layer A, hermetic)", () => {
     expect(notify.mock.calls[0][1]).toContain("oidc-refresh-failed");
   });
 
-  // ───────────────────── #1050 B2 edge-triggered rw-fallback alert (AC-5) ─────────────────────
-
-  it("AC-5a: fallback `uploaded` after a NON-fallback `uploaded` → notify fired exactly once", async () => {
-    writeFileSync(logPath, record("uploaded", "oidc-file", { hash: H_OLD }), "utf8");
+  it("a successful `uploaded` run fires NO notification (the streak alert is failure-only)", async () => {
+    // #1405 removed the rw-fallback alert with the rw arms; the only remaining
+    // alert channel is the failure streak, which a success must never trip.
     const notify = jest.fn();
     const put = jest.fn<ReturnType<PutFn>, Parameters<PutFn>>(async () => ({ url: FAKE_URL }));
 
-    const code = await uploadBoard({
-      put,
-      resolveAuth: () => ({ mode: "rw", token: "SECRET-TOKEN", reason: "rw-keychain-fallback" }),
-      boardPath,
-      logPath,
-      notify,
-    });
-
-    expect(code).toBe(0);
-    expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify.mock.calls[0][1]).toContain("fell back to the RW token");
-    expect(notify.mock.calls[0][1]).toContain("rw-keychain-fallback");
-    // Reason tokens only — never a credential value.
-    expect(notify.mock.calls[0][1]).not.toContain("SECRET-TOKEN");
-    assertLogClean(logPath);
-  });
-
-  it("AC-5b: a SECOND fallback `uploaded` with only skips/failures in between → NOT re-fired", async () => {
-    writeFileSync(
-      logPath,
-      record("uploaded", "rw-keychain-fallback", { hash: H_OLD }) +
-        record("skipped-unchanged", "unchanged", { hash: H_OLD }) +
-        record("failed", "TypeError"),
-      "utf8"
-    );
-    const notify = jest.fn();
-    const put = jest.fn<ReturnType<PutFn>, Parameters<PutFn>>(async () => ({ url: FAKE_URL }));
-
-    const code = await uploadBoard({
-      put,
-      resolveAuth: () => ({ mode: "rw", token: "SECRET-TOKEN", reason: "rw-keychain-fallback" }),
-      boardPath,
-      logPath,
-      notify,
-    });
-
-    expect(code).toBe(0);
-    expect(put).toHaveBeenCalledTimes(1); // H_OLD ≠ current hash → real upload happened
-    expect(notify).not.toHaveBeenCalled(); // edge suppressed — one alert per outage
-  });
-
-  it("AC-5c: a deliberate rw upload (no OIDC-signal → plain rw-env reason) NEVER fires the fallback alert", async () => {
-    const notify = jest.fn();
-    const put = jest.fn<ReturnType<PutFn>, Parameters<PutFn>>(async () => ({ url: FAKE_URL }));
-
-    const code = await uploadBoard({ put, resolveAuth: () => RW_AUTH, boardPath, logPath, notify });
+    const code = await uploadBoard({ put, resolveAuth: () => OIDC_AUTH, boardPath, logPath, notify });
 
     expect(code).toBe(0);
     expect(notify).not.toHaveBeenCalled();
-  });
-
-  it("AC-5 (F9): fallback `uploaded` with NO prior `uploaded` record at all → edge → notify fired", async () => {
-    // Empty log (first-ever upload / truncated log) — missing-prior counts as an edge.
-    const notify = jest.fn();
-    const put = jest.fn<ReturnType<PutFn>, Parameters<PutFn>>(async () => ({ url: FAKE_URL }));
-
-    const code = await uploadBoard({
-      put,
-      resolveAuth: () => ({ mode: "rw", token: "SECRET-TOKEN", reason: "rw-env-fallback" }),
-      boardPath,
-      logPath,
-      notify,
-    });
-
-    expect(code).toBe(0);
-    expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify.mock.calls[0][1]).toContain("rw-env-fallback");
-  });
-
-  it("AC-5: an OIDC `uploaded` in between re-arms the edge (recover-then-re-break alerts again)", async () => {
-    writeFileSync(
-      logPath,
-      record("uploaded", "rw-keychain-fallback", { hash: H_OLD }) +
-        record("uploaded", "oidc-refreshed", { hash: H_OLD }),
-      "utf8"
-    );
-    const notify = jest.fn();
-    const put = jest.fn<ReturnType<PutFn>, Parameters<PutFn>>(async () => ({ url: FAKE_URL }));
-
-    await uploadBoard({
-      put,
-      resolveAuth: () => ({ mode: "rw", token: "SECRET-TOKEN", reason: "rw-keychain-fallback" }),
-      boardPath,
-      logPath,
-      notify,
-    });
-
-    expect(notify).toHaveBeenCalledTimes(1);
   });
 
   // ───────────────────────── #1358 skip-if-unchanged (both-ends) ─────────────────────────
@@ -352,12 +253,12 @@ describe("uploadBoard — courier unit (#1158 Layer A, hermetic)", () => {
     // Pre-seed an `uploaded` record carrying a DIFFERENT (old) hash.
     writeFileSync(
       logPath,
-      record("uploaded", "rw-env", { boardBytes: 1, hash: H_OLD }),
+      record("uploaded", "oidc-file", { boardBytes: 1, hash: H_OLD }),
       "utf8"
     );
     const put = jest.fn<ReturnType<PutFn>, Parameters<PutFn>>(async () => ({ url: FAKE_URL }));
 
-    const code = await uploadBoard({ put, resolveAuth: () => RW_AUTH, boardPath, logPath });
+    const code = await uploadBoard({ put, resolveAuth: () => OIDC_AUTH, boardPath, logPath });
 
     expect(code).toBe(0);
     expect(put).toHaveBeenCalledTimes(1);
@@ -373,7 +274,7 @@ describe("uploadBoard — courier unit (#1158 Layer A, hermetic)", () => {
     // Pre-seed a record whose hash IS the sha256 of the current BOARD_BODY.
     writeFileSync(
       logPath,
-      record("uploaded", "rw-env", {
+      record("uploaded", "oidc-file", {
         boardBytes: Buffer.byteLength(BOARD_BODY),
         hash: H_BODY,
       }),
@@ -381,7 +282,7 @@ describe("uploadBoard — courier unit (#1158 Layer A, hermetic)", () => {
     );
     const put = jest.fn<ReturnType<PutFn>, Parameters<PutFn>>();
 
-    const code = await uploadBoard({ put, resolveAuth: () => RW_AUTH, boardPath, logPath });
+    const code = await uploadBoard({ put, resolveAuth: () => OIDC_AUTH, boardPath, logPath });
 
     // The metered put is suppressed — the remote already holds these exact bytes.
     expect(put).toHaveBeenCalledTimes(0);
@@ -407,7 +308,7 @@ describe("uploadBoard — courier unit (#1158 Layer A, hermetic)", () => {
     );
     const put = jest.fn<ReturnType<PutFn>, Parameters<PutFn>>();
 
-    const code = await uploadBoard({ put, resolveAuth: () => RW_AUTH, boardPath, logPath });
+    const code = await uploadBoard({ put, resolveAuth: () => OIDC_AUTH, boardPath, logPath });
 
     expect(put).toHaveBeenCalledTimes(0);
     expect(code).toBe(0);
@@ -420,7 +321,7 @@ describe("uploadBoard — courier unit (#1158 Layer A, hermetic)", () => {
     // logPath does not exist yet (fresh temp root) → lastRemoteHash returns null → upload.
     const put = jest.fn<ReturnType<PutFn>, Parameters<PutFn>>(async () => ({ url: FAKE_URL }));
 
-    const code = await uploadBoard({ put, resolveAuth: () => RW_AUTH, boardPath, logPath });
+    const code = await uploadBoard({ put, resolveAuth: () => OIDC_AUTH, boardPath, logPath });
 
     expect(code).toBe(0);
     expect(put).toHaveBeenCalledTimes(1);
@@ -442,7 +343,7 @@ describe("uploadBoard — courier unit (#1158 Layer A, hermetic)", () => {
     );
     const put = jest.fn<ReturnType<PutFn>, Parameters<PutFn>>(async () => ({ url: FAKE_URL }));
 
-    const code = await uploadBoard({ put, resolveAuth: () => RW_AUTH, boardPath, logPath });
+    const code = await uploadBoard({ put, resolveAuth: () => OIDC_AUTH, boardPath, logPath });
 
     expect(code).toBe(0);
     expect(put).toHaveBeenCalledTimes(1); // never wrongly skip on legacy data
@@ -455,7 +356,6 @@ describe("uploadBoard — courier unit (#1158 Layer A, hermetic)", () => {
 
   it("(v) AC-IMPORTABLE: importing the courier under NODE_ENV=test fires neither put nor security/vercel", () => {
     expect(process.env.NODE_ENV).toBe("test");
-    delete process.env.BLOB_READ_WRITE_TOKEN; // force the resolver branch if main ran
     process.env.OUT = boardPath; // make existsSync(boardPath) true if the guard were gone
 
     // eslint-disable-next-line @typescript-eslint/no-var-requires

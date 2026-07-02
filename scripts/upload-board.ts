@@ -6,13 +6,12 @@
 // 1.5s polling sees fresh cards). Prints ONLY the resulting blob URL + a one-line
 // env hint — NEVER a credential.
 //
-// Auth (#1050): ALL credential resolution lives in scripts/blob-auth.ts —
-// OIDC-first (short-lived, self-refreshing via `vercel env pull`), long-lived
-// RW token (env / macOS Keychain) as the labeled fallback. A SUCCESSFUL upload
-// that had to fall back to the RW token on an OIDC-configured machine fires an
-// out-of-band notification (edge-triggered — B2): a silent success-path
-// fallback is exactly the #43 log-only anti-pattern, and it would otherwise
-// surface only on the day the operator revokes the RW token.
+// Auth (#1050, #1405): ALL credential resolution lives in scripts/blob-auth.ts —
+// OIDC only (short-lived, self-refreshing via `vercel env pull`). The long-lived
+// RW token was revoked server-side 2026-07-02 and its arms (and the rw-fallback
+// alert that watched them) were removed (#1405). The auth-agnostic
+// failure-STREAK alert below survives — it fires on ANY 3 consecutive
+// non-success records regardless of auth path.
 //
 // The courier OWNS its outcome record: it writes a data/sync.log line (uploaded /
 // skipped-no-token / failed) BEFORE every exit, success AND non-zero (#1158) — so a
@@ -32,15 +31,14 @@ import {
 } from "../lib/sync-log";
 
 /** Minimal structural type for the blob `put` so a test can inject a mock.
- * In "oidc" mode the courier passes oidcToken+storeId and NO `token` key —
- * the SDK's implementation prefers an explicit `token` over OIDC, so passing
- * both would silently defeat OIDC (verified against @vercel/blob 2.4.1). */
+ * The courier passes oidcToken+storeId and NO `token` key — the SDK's
+ * implementation prefers an explicit `token` over OIDC, so passing both would
+ * silently defeat OIDC (verified against @vercel/blob 2.4.1). */
 export type PutFn = (
   pathname: string,
   body: Buffer,
   opts: {
     access: "public";
-    token?: string;
     oidcToken?: string;
     storeId?: string;
     addRandomSuffix: boolean;
@@ -125,37 +123,13 @@ function maybeAlertOnFailureStreak(
   }
 }
 
-/** An `uploaded` record served by an rw arm that FELL THROUGH a configured OIDC path. */
-function isRwFallbackReason(reason: string): boolean {
-  return reason === "rw-env-fallback" || reason === "rw-keychain-fallback";
-}
-
-/**
- * B2 edge rule: alert iff the newest PRIOR `uploaded` record does NOT carry an
- * rw-*-fallback reason. Interleaved `skipped-unchanged` / `failed` /
- * `skipped-no-token` records do not reset the edge, so a long OIDC outage
- * alerts exactly once; an `oidc-*` upload in between re-arms it (per-outage
- * semantics). F9: NO prior `uploaded` record at all (first-ever upload or a
- * truncated log) counts as an edge → alert.
- */
-function newestPriorUploadedIsFallback(priorRecords: SyncRecord[]): boolean {
-  for (let i = priorRecords.length - 1; i >= 0; i--) {
-    if (priorRecords[i].result === "uploaded") {
-      return isRwFallbackReason(priorRecords[i].reason);
-    }
-  }
-  return false; // F9: no prior uploaded record → treat as an edge → alert
-}
-
 const TOKEN_HELP = [
   "upload-board: no Blob credential found.",
-  "  OIDC (primary — short-lived, self-refreshing): from the linked repo root run",
+  "  OIDC (the only credential path — short-lived, self-refreshing): from the",
+  "  linked repo root run",
   "    vercel env pull .env.vercel-oidc.local --yes",
   "  …the courier then refreshes it automatically near expiry (overrides:",
   "  OIDC_TOKEN_FILE, OIDC_REFRESH_SKEW_S).",
-  "  RW fallback (CI / non-Mac): export BLOB_READ_WRITE_TOKEN, or store it in the",
-  "  macOS Keychain:",
-  '    security add-generic-password -a "$USER" -s BLOB_READ_WRITE_TOKEN -w',
   "  See .env.example for the full note.",
 ].join("\n");
 
@@ -235,8 +209,7 @@ export async function uploadBoard(deps: UploadDeps): Promise<number> {
 
   // Content-hash dedup (#1358): a sha256 hex of the EXACT upload bytes. Safe to log
   // (one-way digest of public board data — not the content, not a credential). Skip
-  // the metered `put` when the remote already holds these exact bytes. The single
-  // pre-append log read also serves the B2 fallback edge rule below (no new I/O).
+  // the metered `put` when the remote already holds these exact bytes.
   const priorRecords = readSyncLog(logPath);
   const hash = crypto.createHash("sha256").update(body).digest("hex");
   const remoteHash = lastRemoteHash(priorRecords);
@@ -266,16 +239,14 @@ export async function uploadBoard(deps: UploadDeps): Promise<number> {
       allowOverwrite: true,
       contentType: "application/json",
     };
-    // oidc mode passes NO `token` key: the SDK prefers an explicit `token` over
-    // OIDC (verified in 2.4.1's resolveBlobAuth), so including it would silently
-    // defeat OIDC. rw mode passes `token` exactly as before.
-    const { url } = await put(
-      "board.json",
-      body,
-      auth.mode === "oidc"
-        ? { ...baseOpts, oidcToken: auth.oidcToken, storeId: auth.storeId }
-        : { ...baseOpts, token: auth.token }
-    );
+    // oidc passes NO `token` key: the SDK prefers an explicit `token` over
+    // OIDC (verified in 2.4.1's resolveBlobAuth), so including one would
+    // silently defeat OIDC. Post-#1405 oidc is the only credentialed mode.
+    const { url } = await put("board.json", body, {
+      ...baseOpts,
+      oidcToken: auth.oidcToken,
+      storeId: auth.storeId,
+    });
 
     // ONLY the URL + the one-line env hint. No credential, ever.
     console.log(url);
@@ -292,20 +263,6 @@ export async function uploadBoard(deps: UploadDeps): Promise<number> {
       },
       logPath
     );
-
-    // B2: a SUCCESSFUL upload that fell back to the RW token is invisible to the
-    // failure-streak alert (it's a success record) — fire the out-of-band channel
-    // on the EDGE only. Message carries reason tokens, never values.
-    if (isRwFallbackReason(auth.reason) && !newestPriorUploadedIsFallback(priorRecords)) {
-      try {
-        notify(
-          "agent-kanban board sync",
-          `Board sync fell back to the RW token (${auth.reason}) — the OIDC path is broken; see data/sync.log.`
-        );
-      } catch {
-        /* best-effort — an alert failure must never break the courier */
-      }
-    }
     return 0;
   } catch (err: unknown) {
     // Print only the message — never the stack (could echo request internals). Log

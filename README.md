@@ -55,16 +55,21 @@ local `data/board.json` → else `data/board.sample.json`. The Blob URL is fetch
 **server-side only** and never reaches the browser, so the private task content stays
 behind the login wall even though the blob itself is public-by-default.
 
-**Token.** `kanban:upload` reads the Vercel Blob write token from the **macOS Keychain**
-(it never lives in a file). Store it once:
+**Credentials (#1050).** `kanban:upload` authenticates with **short-lived OIDC
+credentials first** and only falls back to the long-lived RW token. Seed the OIDC
+token file once from the linked repo root:
 
 ```sh
-security add-generic-password -a "$USER" -s BLOB_READ_WRITE_TOKEN -w
+vercel env pull .env.vercel-oidc.local --yes
 ```
 
-On CI / non-Mac, export `BLOB_READ_WRITE_TOKEN` in the environment instead. After the
-first upload, set the printed `BOARD_BLOB_URL=<url>` in the Vercel project env. See
-`.env.example`.
+The courier re-pulls it automatically near expiry (`OIDC_TOKEN_FILE` /
+`OIDC_REFRESH_SKEW_S` override the path/window). The RW fallback for CI / non-Mac is
+`BLOB_READ_WRITE_TOKEN` in the environment, or the macOS Keychain
+(`security add-generic-password -a "$USER" -s BLOB_READ_WRITE_TOKEN -w`); on an
+OIDC-configured machine any RW-fallback upload fires a notification — the OIDC path
+is broken. After the first upload, set the printed `BOARD_BLOB_URL=<url>` in the
+Vercel project env. See `.env.example`.
 
 ### Live sync — opt-in PostToolUse hook
 

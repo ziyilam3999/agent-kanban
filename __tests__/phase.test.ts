@@ -66,16 +66,15 @@ describe("phaseLine", () => {
     expect(p.ariaLabel).toContain("working now");
   });
 
-  it("in_review with an execution-review PASS → ◆ REVIEW · PASS", () => {
+  it("in_review with an execution-review PASS → ✓ PASS — SHIPPING (passed review ships from REVIEW — #1410)", () => {
     const p = phaseLine(
       ticket("in_review", [
         { role: "executor", ts: at(1) },
         { role: "execution-review", ts: at(2), verdict: "PASS" },
       ])
     );
-    expect(p.text).toContain("REVIEW");
-    expect(p.text).toContain("PASS");
-    expect(p.hueVar).toBe("var(--done)"); // PASS → green
+    expect(p.text).toBe("✓ PASS — SHIPPING");
+    expect(p.hueVar).toBe("var(--done)"); // shipping state hue — green
   });
 
   it("in_review with no verdict → ◆ REVIEW", () => {

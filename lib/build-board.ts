@@ -18,7 +18,7 @@ import type {
   SessionSummary,
   Ticket,
 } from "./board-schema";
-import { PIPELINE_ROLES } from "./ui-meta";
+import { PIPELINE_ROLES, isFailClassVerdict } from "./ui-meta";
 
 /** The canonical pipeline roles as a set (orchestrator is NOT a member). */
 const PIPELINE_ROLE_SET = new Set<string>(PIPELINE_ROLES);
@@ -139,17 +139,32 @@ export function basenameOf(p: string): string {
 }
 
 /**
+ * Classification of a ticket's NEWEST execution-review ledger line (#1410).
+ * Discriminated four-state replacing the old pending/not-pending boolean:
+ *   "none"             — no execution-review line at all
+ *   "pending"          — newest execution-review has no resolvable verdict
+ *   "resolved-nonfail" — newest execution-review resolved to a NON-fail verdict
+ *   "resolved-fail"    — newest execution-review resolved to FAIL/BLOCK/REJECT
+ */
+export type ExecReviewState = "none" | "pending" | "resolved-nonfail" | "resolved-fail";
+
+/**
  * Map a raw task status (+ derived ledger signals) to a display Column:
- *   completed                                       → done
- *   in_progress + a PENDING execution-review        → in_review
- *   in_progress otherwise                            → in_progress
+ *   completed                                        → done
+ *   in_progress + exec-review "pending"              → in_review
+ *   in_progress + exec-review "resolved-nonfail"     → in_review (monotonic —
+ *                    passed review, stays in REVIEW for the ship tail, #1410)
+ *   in_progress + exec-review "resolved-fail"        → in_progress (rework is
+ *                    the honest backward move)
+ *   in_progress + exec-review "none"                 → in_progress
  *   pending + a pipeline-role comment                → in_progress (already started)
  *   pending otherwise                                → todo
  *
- * `hasPendingExecutionReview` is TRUE iff the NEWEST execution-review ledger line is
- * still unresolved (no verdict). A resolved (PASS/FAIL) execution-review, or none at
- * all, leaves an in_progress task in in_progress — "a review is pending NOW", not
- * "a review ever happened" (#1304).
+ * MONOTONIC RULE (#1410, supersedes #1304's "pending NOW, not ever"): the board
+ * only moves forward. Once an execution review resolves NON-fail, the card
+ * stays in REVIEW — wearing the "✓ <VERDICT> — SHIPPING" pill — until the task
+ * completes (→ done). Only a fail-class verdict sends it backward to
+ * IN PROGRESS. `execReview` is `newestExecutionReviewState(ledgerLines)`.
  *
  * `hasPipelineRoleComment` is TRUE iff the ledger carries ≥1 comment whose role is a
  * PIPELINE_ROLES member (planner / plan-review / executor / execution-review).
@@ -157,14 +172,16 @@ export function basenameOf(p: string): string {
  */
 export function toColumn(
   status: RawTask["status"],
-  hasPendingExecutionReview: boolean,
+  execReview: ExecReviewState,
   hasPipelineRoleComment = false
 ): Column {
   switch (status) {
     case "completed":
       return "done";
     case "in_progress":
-      return hasPendingExecutionReview ? "in_review" : "in_progress";
+      return execReview === "pending" || execReview === "resolved-nonfail"
+        ? "in_review"
+        : "in_progress";
     case "pending":
     default:
       return hasPipelineRoleComment ? "in_progress" : "todo";
@@ -177,7 +194,7 @@ export function toColumn(
  * guarded best-effort artifact read). Returns the RAW token (no redact / no cap)
  * or undefined when no verdict can be resolved. Pure except the guarded read —
  * never throws. This is the SINGLE source of truth for verdict resolution: both
- * `toComment` (display) and `hasPendingExecutionReview` (column) call it.
+ * `toComment` (display) and `newestExecutionReviewState` (column) call it.
  */
 function resolveVerdict(line: RawLedgerLine): string | undefined {
   // PRIMARY: an explicit verdict recorded on the ledger line.
@@ -225,14 +242,20 @@ function toComment(line: RawLedgerLine): LedgerComment {
 }
 
 /**
- * TRUE iff the NEWEST `execution-review` ledger line is still PENDING (no resolved
- * verdict). "Newest" = max by parsed `ts`; a tie (equal `ts`, or all `ts`
- * NaN/missing) is broken by LATEST array index — the ledger is append-ordered, so
- * the last-appended execution-review is the genuinely newest at equal-second
- * granularity. A NaN/missing `ts` sorts as oldest. Returns false when there is no
- * execution-review at all. (MINOR-1 tiebreak; #1304.)
+ * Classify the NEWEST `execution-review` ledger line (#1410, generalizing the
+ * old boolean hasPendingExecutionReview). "Newest" = max by parsed `ts`; a tie
+ * (equal `ts`, or all `ts` NaN/missing) is broken by LATEST array index — the
+ * ledger is append-ordered, so the last-appended execution-review is the
+ * genuinely newest at equal-second granularity. A NaN/missing `ts` sorts as
+ * oldest (MINOR-1 tiebreak). The newest line's `resolveVerdict` then maps:
+ * undefined → "pending", fail-class → "resolved-fail", else →
+ * "resolved-nonfail"; no execution-review at all → "none". The monotonic column
+ * rule (#1410) keeps both "pending" AND "resolved-nonfail" in REVIEW — only
+ * "resolved-fail" returns an in_progress task to IN PROGRESS.
  */
-function hasPendingExecutionReview(ledgerLines: RawLedgerLine[]): boolean {
+export function newestExecutionReviewState(
+  ledgerLines: RawLedgerLine[]
+): ExecReviewState {
   let newest: RawLedgerLine | undefined;
   let newestTs = -Infinity; // NaN/missing ts sorts as oldest (-Infinity)
   for (const line of ledgerLines) {
@@ -245,8 +268,10 @@ function hasPendingExecutionReview(ledgerLines: RawLedgerLine[]): boolean {
       newestTs = ts;
     }
   }
-  if (newest === undefined) return false;
-  return resolveVerdict(newest) === undefined;
+  if (newest === undefined) return "none";
+  const verdict = resolveVerdict(newest);
+  if (verdict === undefined) return "pending";
+  return isFailClassVerdict(verdict) ? "resolved-fail" : "resolved-nonfail";
 }
 
 /**
@@ -273,7 +298,7 @@ export function buildTicket(
     .sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts))
     .map(toComment);
 
-  const pendingExecutionReview = hasPendingExecutionReview(ledgerLines);
+  const execReviewState = newestExecutionReviewState(ledgerLines);
   // TRUE iff any ledger comment is from a pipeline role (orchestrator excluded) —
   // lets a pending task that a role has already started surface as in_progress.
   const hasPipelineRoleComment = ledgerLines.some((l) =>
@@ -284,7 +309,7 @@ export function buildTicket(
     id: rawTask.id,
     subject: rawTask.subject,
     description: redact(rawTask.description ?? ""),
-    column: toColumn(rawTask.status, pendingExecutionReview, hasPipelineRoleComment),
+    column: toColumn(rawTask.status, execReviewState, hasPipelineRoleComment),
     status: rawTask.status,
     blockedBy: rawTask.blockedBy ?? [],
     comments,

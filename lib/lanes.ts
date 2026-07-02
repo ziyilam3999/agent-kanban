@@ -5,7 +5,7 @@
 // NO network, no poll, no schema change. Pure so it unit-tests in node.
 
 import type { Ticket } from "./board-schema";
-import { PIPELINE_ROLES } from "./ui-meta";
+import { PIPELINE_ROLES, shippingAfterPass } from "./ui-meta";
 
 /** One live ticket's lane descriptor for the swimlanes view. */
 export interface Lane {
@@ -27,13 +27,19 @@ export interface Lane {
  * Derive the live swimlanes from the visible tickets + the active-id set.
  *
  * A ticket becomes a lane when it is BOTH in `activeIds` (genuinely live per
- * computeActiveIds) AND in the `in_progress` column. Lanes are sorted focus-first
- * (newest `updatedAt` first) for a stable, meaningful order.
+ * computeActiveIds) AND in the lane population — the `in_progress` column, plus
+ * passed-and-shipping REVIEW-column tickets (#1410: a resolved-PASS execution
+ * review keeps the card in REVIEW for the ship tail, but its lane semantics
+ * must not change). Lanes are sorted focus-first (newest `updatedAt` first)
+ * for a stable, meaningful order.
  *
  * The caller (BoardView) gates rendering on `deriveLanes(...).length >= 2` — below
  * two live lanes the normal column board renders unchanged.
  *
- * @param tickets   the visible tickets (any columns; only in_progress can be a lane)
+ * @param tickets   the visible tickets (any columns; the lane population is
+ *                  in_progress ∪ shipping — master-equivalent for all-valid-ts
+ *                  exec-review ledgers; a mixed valid/NaN ledger can diverge —
+ *                  see the mixed-ts pin in monotonic-flow.test.ts)
  * @param activeIds the set from computeActiveIds() — the "breathing right now" ids
  */
 export function deriveLanes(
@@ -43,7 +49,9 @@ export function deriveLanes(
   const lanes: Array<Lane & { updatedAt: number }> = [];
 
   for (const t of tickets) {
-    if (t.column !== "in_progress") continue;
+    // Lane population (#1410): in_progress OR passed-and-shipping — must match
+    // computeActiveIds' filter. Revisit if a future Column value is added.
+    if (t.column !== "in_progress" && !shippingAfterPass(t)) continue;
     if (!activeIds.has(t.id)) continue;
 
     const rolesSeen = new Set(t.comments.map((c) => c.role));

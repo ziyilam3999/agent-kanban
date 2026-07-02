@@ -21,15 +21,19 @@ const render = (t: Ticket, active = false) =>
   renderToStaticMarkup(createElement(Card, { ticket: t, nowMs: 2, active }));
 
 describe("Card phase line render", () => {
-  it("in_review + PASS card → markup carries REVIEW and PASS", () => {
+  it("in_review + PASS card → markup carries the shipping pill (PASS + SHIPPING — #1410)", () => {
+    // Re-derived for #1410: an in_review card whose newest exec-review resolved
+    // PASS now renders the ✓ PASS — SHIPPING pill (fresh: nowMs=2, updatedAt=1).
+    // Asserting SHIPPING (not just REVIEW/PASS substrings) so this cannot go
+    // accidentally green via pip titles.
     const markup = render(
       ticket("in_review", [
         { role: "executor", ts: "2026-06-21T01:00:00.000Z" },
         { role: "execution-review", ts: "2026-06-21T02:00:00.000Z", verdict: "PASS" },
       ])
     );
-    expect(markup).toContain("REVIEW");
     expect(markup).toContain("PASS");
+    expect(markup).toContain("SHIPPING");
   });
 
   it("todo card with no comments → markup carries QUEUED and no verdict token", () => {

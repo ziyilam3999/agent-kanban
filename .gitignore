@@ -44,3 +44,6 @@ playwright-report/
 
 # --- git worktrees (intentional, e.g. live-deploy) — never tracked ---
 .worktrees/
+
+# --- Vercel CLI project link (created by `vercel link`) — machine-local, never tracked ---
+.vercel/

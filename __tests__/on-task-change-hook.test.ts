@@ -7,21 +7,17 @@
 //   (b) a `skipped-no-token` line was appended to the temp SYNC_LOG (proves the hook
 //       invoked the courier UNCONDITIONALLY end-to-end after the pre-probe removal).
 //
-// HERMETICITY (R2-MED-1 + #1050 B1 fence): the host Keychain HOLDS the real token,
-// so merely unsetting BLOB_READ_WRITE_TOKEN would let the resolver fall through to
-// `security` and do a REAL Keychain read + REAL upload. We neutralize the host
-// Keychain by prepending a temp dir to PATH that contains a `security` STUB which
-// exits non-zero (exit 1 → the resolver's honest keychain-unreachable-or-absent
-// classification) — so the keychain read fails DETERMINISTICALLY and no real upload
-// can occur. #1050 adds the OIDC arms, which the fence covers too: (a) the ambient
-// VERCEL_OIDC_TOKEN / BLOB_STORE_ID env vars are DELETED, (b) OIDC_TOKEN_FILE points
-// at a NONEXISTENT temp path (so the real repo-root token file — which EXISTS with a
-// live token after rollout — is never read; this is the red-on-regression proof that
-// the env override is honored by the real default deps), and (c) a fake `vercel`
-// stub (exit 1) sits beside the `security` stub so the refresh/bootstrap pull arm is
-// inert. We also point TASKS_DIR + OUT at temp paths so export:board is hermetic and
-// never reads/writes the real ~/.claude state or the repo's data/board.json. No real
-// Keychain, no network, no real CLI, on ANY host.
+// HERMETICITY (R2-MED-1 + #1050 B1 fence, updated for #1405's OIDC-only 2-arm
+// reality): (a) the ambient VERCEL_OIDC_TOKEN / BLOB_STORE_ID env vars are
+// DELETED, (b) OIDC_TOKEN_FILE points at a NONEXISTENT temp path (so the real
+// repo-root token file — which EXISTS with a live token after rollout — is
+// never read; this is the red-on-regression proof that the env override is
+// honored by the real default deps), and (c) a fake `vercel` stub (exit 1)
+// sits on a prepended PATH so the refresh/bootstrap pull arm is inert. A
+// `security` stub is KEPT beside it as defense-in-depth (see beforeEach). We
+// also point TASKS_DIR + OUT at temp paths so export:board is hermetic and
+// never reads/writes the real ~/.claude state or the repo's data/board.json.
+// No real Keychain, no network, no real CLI, on ANY host.
 
 import { spawnSync } from "node:child_process";
 import {
@@ -54,8 +50,6 @@ function hookEnv(extra: Record<string, string>): Record<string, string | undefin
     OIDC_TOKEN_FILE: join(root, "no-such-oidc-token.env"),
     ...extra,
   };
-  // Force the genuine no-token path regardless of the host Keychain / CI env.
-  delete env.BLOB_READ_WRITE_TOKEN;
   // B1 fence: strip any ambient OIDC credentials (arm 1 of the resolver).
   delete env.VERCEL_OIDC_TOKEN;
   delete env.BLOB_STORE_ID;
@@ -70,8 +64,10 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "akb-hook-"));
   logPath = join(root, "sync.log");
 
-  // A `security` stub that always fails (exit 1) → the resolver can never read the
-  // real Keychain (clean black-box neutralization). Shadows /usr/bin/security.
+  // A `security` stub that always fails (exit 1). Shadows /usr/bin/security.
+  // Defense-in-depth: keeps this hook test hermetic even if an exec-based
+  // credential arm (keyed on the revoked RW-token service name) is ever
+  // reintroduced — the standing fence PR #45's keep-hermetic-fences lesson asks for.
   stubDir = join(root, "bin");
   mkdirSync(stubDir, { recursive: true });
   const stub = join(stubDir, "security");

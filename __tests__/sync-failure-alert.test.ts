@@ -94,9 +94,10 @@ describe("uploadBoard wires the alert (hermetic, injected notify)", () => {
       throw new Error("Vercel Blob: Access denied (synthetic test error)");
     },
     resolveAuth: () => ({
-      mode: "rw" as const,
-      token: "synthetic-test-token",
-      reason: "rw-env",
+      mode: "oidc" as const,
+      oidcToken: "synthetic-test-token",
+      storeId: "store_test123",
+      reason: "oidc-file",
     }),
     boardPath,
     logPath,

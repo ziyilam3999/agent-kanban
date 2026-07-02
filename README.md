@@ -55,21 +55,17 @@ local `data/board.json` → else `data/board.sample.json`. The Blob URL is fetch
 **server-side only** and never reaches the browser, so the private task content stays
 behind the login wall even though the blob itself is public-by-default.
 
-**Credentials (#1050).** `kanban:upload` authenticates with **short-lived OIDC
-credentials first** and only falls back to the long-lived RW token. Seed the OIDC
-token file once from the linked repo root:
+**Credentials (#1050, #1405).** `kanban:upload` authenticates with **short-lived
+OIDC credentials only** — the long-lived RW token was revoked 2026-07-02 and its
+code paths were removed. Seed the OIDC token file once from the linked repo root:
 
 ```sh
 vercel env pull .env.vercel-oidc.local --yes
 ```
 
 The courier re-pulls it automatically near expiry (`OIDC_TOKEN_FILE` /
-`OIDC_REFRESH_SKEW_S` override the path/window). The RW fallback for CI / non-Mac is
-`BLOB_READ_WRITE_TOKEN` in the environment, or the macOS Keychain
-(`security add-generic-password -a "$USER" -s BLOB_READ_WRITE_TOKEN -w`); on an
-OIDC-configured machine any RW-fallback upload fires a notification — the OIDC path
-is broken. After the first upload, set the printed `BOARD_BLOB_URL=<url>` in the
-Vercel project env. See `.env.example`.
+`OIDC_REFRESH_SKEW_S` override the path/window). After the first upload, set the
+printed `BOARD_BLOB_URL=<url>` in the Vercel project env. See `.env.example`.
 
 ### Live sync — opt-in PostToolUse hook
 
@@ -81,12 +77,12 @@ PostToolUse entry to `~/.claude/settings.json` whose command is the absolute pat
 `scripts/on-task-change.sh` (matcher scoped to the task-writing tool you use); it is
 idempotent and fast, so re-running it per change is cheap.
 
-**Sync logbook + background-token note (#1158).** Every courier run appends one JSONL
-line to `data/sync.log` (gitignored) recording its outcome — `uploaded` / `skipped-no-token`
-/ `failed` (override the path with the `SYNC_LOG` env var). So a sync is never silent: if
-a background run skips, the reason is on the record. To make **background** syncs reliably
-*upload* (not just log a clean skip), export `BLOB_READ_WRITE_TOKEN` into the hook/launch
-environment — the macOS Keychain is not reliably readable from a detached/background shell,
-so the env path is the durable background option. This adds **no** secret to any committed
-file. With no reachable token, the hook re-exports locally and logs `skipped-no-token`,
-still exiting 0.
+**Sync logbook + background-sync note (#1158, #1405).** Every courier run appends one
+JSONL line to `data/sync.log` (gitignored) recording its outcome — `uploaded` /
+`skipped-no-token` / `failed` (override the path with the `SYNC_LOG` env var). So a sync
+is never silent: if a background run skips, the reason is on the record. Background syncs
+authenticate through the OIDC token file (`.env.vercel-oidc.local` by default) — a plain
+file, readable from detached/background shells — which the courier self-refreshes near
+expiry. This adds **no** secret to any committed file. With no reachable credential, the
+hook re-exports locally and logs `skipped-no-token`, still exiting 0; three consecutive
+non-success records fire an out-of-band notification.

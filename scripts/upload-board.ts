@@ -24,6 +24,7 @@ import {
   appendSyncRecord,
   defaultSyncLogPath,
   readSyncLog,
+  type SyncRecord,
 } from "../lib/sync-log";
 
 /** Minimal structural type for the blob `put` so a test can inject a mock. */
@@ -52,6 +53,73 @@ export interface UploadDeps {
   resolveToken: () => TokenResolution;
   boardPath: string;
   logPath: string;
+  /** Out-of-band failure alert (default: macOS notification). Injectable for tests. */
+  notify?: (title: string, message: string) => void;
+}
+
+/**
+ * Consecutive NOT-SYNCED records at the tail of the log (fail-closed: anything that
+ * is not a success outcome — `uploaded` / `skipped-unchanged` — counts, so `failed`,
+ * `skipped-no-token`, and any future/hook-written result like `export-failed` all
+ * register). This is what "the board is silently going stale" looks like in data.
+ */
+export function consecutiveTrailingFailures(
+  records: Pick<SyncRecord, "result">[]
+): number {
+  let n = 0;
+  for (let i = records.length - 1; i >= 0; i--) {
+    const r = records[i].result;
+    if (r === "uploaded" || r === "skipped-unchanged") break;
+    n++;
+  }
+  return n;
+}
+
+/**
+ * Alert at 3 consecutive failures, then every 3rd after (6, 9, …) — loud enough to
+ * reach the operator, debounced enough not to spam a long outage on every task edit.
+ */
+export function shouldNotify(consecutive: number): boolean {
+  return consecutive >= 3 && consecutive % 3 === 0;
+}
+
+/**
+ * Default out-of-band alert: a macOS user notification. The hook wrapper discards
+ * the courier's stdio (`nohup … >/dev/null 2>&1 &`), so a log line / console.error
+ * is STRUCTURALLY silent — this is the only channel that reaches a human (#1051
+ * outage: 3x BlobAccessError logged, board stale ~25 min, zero alert). Best-effort:
+ * never throws, no-op off-macOS. Message carries only result/reason tokens.
+ */
+export function defaultNotify(title: string, message: string): void {
+  if (process.platform !== "darwin") return;
+  try {
+    execFileSync(
+      "osascript",
+      ["-e", `display notification ${JSON.stringify(message)} with title ${JSON.stringify(title)} sound name "Basso"`],
+      { stdio: "ignore", timeout: 5000 }
+    );
+  } catch {
+    /* best-effort — an alert failure must never break the courier */
+  }
+}
+
+/** After a failure record lands: alert out-of-band if the trailing streak warrants. */
+function maybeAlertOnFailureStreak(
+  logPath: string,
+  notify: (title: string, message: string) => void,
+  lastReason: string
+): void {
+  try {
+    const n = consecutiveTrailingFailures(readSyncLog(logPath));
+    if (shouldNotify(n)) {
+      notify(
+        "agent-kanban board sync",
+        `Board sync has failed ${n} times in a row (latest: ${lastReason}). The live board is going stale — check data/sync.log.`
+      );
+    }
+  } catch {
+    /* best-effort */
+  }
 }
 
 const TOKEN_HELP = [
@@ -123,6 +191,7 @@ function lastRemoteHash(logPath: string): string | null {
  */
 export async function uploadBoard(deps: UploadDeps): Promise<number> {
   const { put, resolveToken, boardPath, logPath } = deps;
+  const notify = deps.notify ?? defaultNotify;
   const now = (): string => new Date().toISOString();
 
   if (!fs.existsSync(boardPath)) {
@@ -140,6 +209,7 @@ export async function uploadBoard(deps: UploadDeps): Promise<number> {
       },
       logPath
     );
+    maybeAlertOnFailureStreak(logPath, notify, "board-not-found");
     return 1;
   }
 
@@ -161,6 +231,7 @@ export async function uploadBoard(deps: UploadDeps): Promise<number> {
       },
       logPath
     );
+    maybeAlertOnFailureStreak(logPath, notify, reason);
     return 1;
   }
 
@@ -233,6 +304,7 @@ export async function uploadBoard(deps: UploadDeps): Promise<number> {
       },
       logPath
     );
+    maybeAlertOnFailureStreak(logPath, notify, errClass);
     return 1;
   }
 }

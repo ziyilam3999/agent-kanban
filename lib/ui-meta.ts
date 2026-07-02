@@ -57,6 +57,35 @@ export function roleLabel(role: string): string {
 }
 
 /**
+ * Fail-class review verdict tokens. ONE shared definition (#1410) — the column
+ * mapping (build-board newestExecutionReviewState), the chain predicate
+ * (active.ts chainInFlight), and the hue precedence (verdictHue below) all
+ * classify through this single regex, so the fail-class boundary can never
+ * drift between layers. A FAIL/BLOCK/REJECT execution-review sends the card
+ * back to IN PROGRESS (rework is an honest backward move) and keeps the chain
+ * in flight; every other resolved verdict counts as non-fail.
+ */
+export const FAIL_CLASS_RE = /BLOCK|FAIL|REJECT/i;
+
+/** TRUE iff the verdict carries a fail-class token (case-insensitive). */
+export function isFailClassVerdict(v: string): boolean {
+  return FAIL_CLASS_RE.test(v);
+}
+
+/**
+ * How long after its last observable event a passed-and-shipping ticket keeps
+ * the "SHIPPING" pill before it dims to "STALE" (#1410). 60 min — deliberately
+ * NOT the 6 h INFLIGHT_LANE_CAP_MS: that cap is tuned for silent multi-hour
+ * EXECUTOR legs mid-chain, whereas the post-PASS ship tail (merge → CI wait →
+ * install → close) is minutes-scale; a pill claiming activity for 6 h would
+ * lie. Configurable: change here, or inject per call via phaseLine's
+ * `shippingStaleCapMs` parameter (same exported-const + injectable-param shape
+ * as ACTIVE_WINDOW_MS / INFLIGHT_LANE_CAP_MS — no env var by the #1403 Q2
+ * precedent).
+ */
+export const SHIPPING_STALE_MS = 60 * 60 * 1000;
+
+/**
  * CSS hue for a review verdict, by precedence (most severe first):
  *   BLOCK / FAIL / REJECT                 → red   (--err)
  *   NOTES / WITH-FIX(ES) / WARN           → amber (--review)
@@ -65,10 +94,12 @@ export function roleLabel(role: string): string {
  * Case-insensitive. A qualified verdict (e.g. APPROVE-WITH-NOTES, SHIP-WITH-FIXES)
  * resolves AMBER because the amber check precedes the green one. Shared by the
  * drawer verdict pills and the card phase line — one source of the precedence.
+ * The severe branch delegates to isFailClassVerdict (the shared fail-class
+ * predicate; its /i flag subsumes the former manual toUpperCase check).
  */
 export function verdictHue(v: string): string {
   const u = v.toUpperCase();
-  if (/BLOCK|FAIL|REJECT/.test(u)) return "var(--err)";
+  if (isFailClassVerdict(u)) return "var(--err)";
   if (/NOTES|WITH-FIX|FIXES|WARN/.test(u)) return "var(--review)";
   if (/APPROVE|PASS/.test(u)) return "var(--done)";
   if (/SHIP/.test(u) && !/FIX/.test(u)) return "var(--done)";
@@ -94,6 +125,30 @@ export function latestReviewVerdict(ticket: Ticket): string | undefined {
   return execVerdict ?? planVerdict;
 }
 
+/**
+ * TRUE iff the ticket passed execution review but its ship tail hasn't
+ * completed (#1410): status still `in_progress` AND the NEWEST execution-review
+ * comment carries a present, non-empty, NON-fail-class verdict. Comments arrive
+ * ts-sorted from build-board, so "newest" = last in array (same convention as
+ * chainInFlight). A `completed` or `pending` ticket is never "shipping".
+ *
+ * NOTE: this comment-POSITION selector can disagree with the server's raw
+ * newest-by-ts selector on a mixed valid-ts+NaN-ts exec-review ledger (the raw
+ * selector sorts NaN as -Infinity/oldest; the comment sort leaves a NaN-ts
+ * line in place) — see the mixed-ts pin in monotonic-flow.test.ts.
+ */
+export function shippingAfterPass(t: Ticket): boolean {
+  if (t.status !== "in_progress") return false;
+  let newestExecVerdict: string | undefined;
+  for (const c of t.comments) {
+    if (c.role === "execution-review") newestExecVerdict = c.verdict;
+  }
+  if (newestExecVerdict === undefined) return false;
+  const v = newestExecVerdict.trim();
+  if (v === "") return false;
+  return !isFailClassVerdict(v);
+}
+
 /** Display metadata for a card's phase line — the plain-words "why it's in this lane". */
 export interface PhaseLine {
   text: string;
@@ -107,14 +162,28 @@ export interface PhaseLine {
  *   todo        → "QUEUED"
  *   in_progress → "▶ <ROLE>" of the latest work role (planner/executor); else
  *                 "▶ WORKING" (mint) when `active`, "▶ STARTED" (cyan) when not
- *   in_review   → "◆ REVIEW · <VERDICT>" (hue by verdict severity), else "◆ REVIEW"
+ *   in_review   → shipping (passed review, ship tail running — #1410):
+ *                 "✓ <VERDICT> — SHIPPING" (green), dimming to
+ *                 "✓ <VERDICT> — STALE" once `nowMs - updatedAt` exceeds
+ *                 `shippingStaleCapMs`; otherwise the pending/fail path:
+ *                 "◆ REVIEW · <VERDICT>" (hue by verdict severity), else "◆ REVIEW"
  *   done        → "✓ DONE" plus " · <VERDICT>" when a review verdict exists
  *
  * `active` (default false) marks the single in_progress ticket the live session is
  * working RIGHT NOW (or a parallel-touched card) — it distinguishes the live focus
  * (▶ WORKING, mint, pulsing) from a begun-but-parked card (▶ STARTED, cyan, static).
+ *
+ * `nowMs` (optional) is the client clock driving the shipping-stale flip; when
+ * omitted the shipping pill never goes stale (back-compat). The staleness is
+ * client-derived so it advances each poll even on a frozen (edge-driven)
+ * snapshot — a server-side decay would freeze exactly when an orchestrator dies.
  */
-export function phaseLine(ticket: Ticket, active = false): PhaseLine {
+export function phaseLine(
+  ticket: Ticket,
+  active = false,
+  nowMs?: number,
+  shippingStaleCapMs = SHIPPING_STALE_MS
+): PhaseLine {
   switch (ticket.column) {
     case "todo":
       return {
@@ -147,6 +216,28 @@ export function phaseLine(ticket: Ticket, active = false): PhaseLine {
       };
     }
     case "in_review": {
+      // Shipping sub-branch FIRST (#1410): passed execution review, ship tail
+      // running. `v` is the newest exec-review comment's verdict — the same one
+      // shippingAfterPass matched (verdicts are 24-char-capped upstream).
+      if (shippingAfterPass(ticket)) {
+        let v = "";
+        for (const c of ticket.comments) {
+          if (c.role === "execution-review" && c.verdict) v = c.verdict;
+        }
+        const stale =
+          nowMs !== undefined && nowMs - ticket.updatedAt > shippingStaleCapMs;
+        return stale
+          ? {
+              text: `✓ ${v} — STALE`,
+              hueVar: "var(--fg-dim)",
+              ariaLabel: `passed review (${v}), shipping stalled`,
+            }
+          : {
+              text: `✓ ${v} — SHIPPING`,
+              hueVar: "var(--done)",
+              ariaLabel: `passed review (${v}), shipping`,
+            };
+      }
       const verdict = latestReviewVerdict(ticket);
       if (!verdict) {
         return {

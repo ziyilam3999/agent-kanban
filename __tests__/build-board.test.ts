@@ -17,43 +17,51 @@ import { COLUMNS, type Board, type Ticket } from "@/lib/board-schema";
 
 describe("toColumn", () => {
   it("maps completed → done", () => {
-    expect(toColumn("completed", false)).toBe("done");
-    expect(toColumn("completed", true)).toBe("done");
+    expect(toColumn("completed", "none")).toBe("done");
+    expect(toColumn("completed", "pending")).toBe("done");
   });
 
   it("maps pending → todo", () => {
-    expect(toColumn("pending", false)).toBe("todo");
-    expect(toColumn("pending", true)).toBe("todo");
+    expect(toColumn("pending", "none")).toBe("todo");
+    expect(toColumn("pending", "pending")).toBe("todo");
   });
 
   it("maps in_progress with no execution-review → in_progress (executor-only stays in_progress)", () => {
-    expect(toColumn("in_progress", false)).toBe("in_progress");
+    expect(toColumn("in_progress", "none")).toBe("in_progress");
   });
 
   it("maps in_progress with execution-review present → in_review", () => {
-    expect(toColumn("in_progress", true)).toBe("in_review");
+    expect(toColumn("in_progress", "pending")).toBe("in_review");
+  });
+
+  it("maps in_progress + resolved-nonfail → in_review (monotonic — #1410)", () => {
+    expect(toColumn("in_progress", "resolved-nonfail")).toBe("in_review");
+  });
+
+  it("maps in_progress + resolved-fail → in_progress (rework goes backward — #1410)", () => {
+    expect(toColumn("in_progress", "resolved-fail")).toBe("in_progress");
   });
 });
 
 describe("toColumn — pending truthfulness fix (hasPipelineRoleComment)", () => {
   it("pending + a pipeline-role comment → in_progress (already started)", () => {
-    expect(toColumn("pending", false, true)).toBe("in_progress");
+    expect(toColumn("pending", "none", true)).toBe("in_progress");
   });
 
   it("pending + NO pipeline-role comment → todo", () => {
-    expect(toColumn("pending", false, false)).toBe("todo");
+    expect(toColumn("pending", "none", false)).toBe("todo");
   });
 
   it("pending defaults to todo when the third arg is omitted (back-compat)", () => {
-    expect(toColumn("pending", false)).toBe("todo");
+    expect(toColumn("pending", "none")).toBe("todo");
   });
 
   it("in_progress + execution-review still wins (precedence preserved)", () => {
-    expect(toColumn("in_progress", true, true)).toBe("in_review");
+    expect(toColumn("in_progress", "pending", true)).toBe("in_review");
   });
 
   it("completed → done regardless of pipeline-role flag", () => {
-    expect(toColumn("completed", false, true)).toBe("done");
+    expect(toColumn("completed", "none", true)).toBe("done");
   });
 });
 
@@ -403,7 +411,7 @@ describe("buildTicket — verdict-from-artifact fallback (seam B, no --verdict)"
   });
 });
 
-describe("buildTicket — in_review means review PENDING NOW, not ever (#1304)", () => {
+describe("buildTicket — monotonic REVIEW flow: pending OR resolved non-fail stays in_review; only fail-class goes backward (#1304 superseded by #1410)", () => {
   const dir = mkdtempSync(join(tmpdir(), "akb-pending-"));
   const writeArtifact = (name: string, body: string): string => {
     const p = join(dir, name);
@@ -411,13 +419,13 @@ describe("buildTicket — in_review means review PENDING NOW, not ever (#1304)",
     return p;
   };
 
-  it("(a) in_progress + execution-review WITH verdict PASS → in_progress (resolved, not pending)", () => {
+  it("(a) in_progress + execution-review WITH verdict PASS → in_review (monotonic: passed review ships from REVIEW — #1410)", () => {
     const t = buildTicket(
       baseTask({ status: "in_progress" }),
       [{ role: "execution-review", ts: "2026-06-27T05:00:00.000Z", verdict: "PASS" }],
       1
     );
-    expect(t.column).toBe("in_progress");
+    expect(t.column).toBe("in_review");
   });
 
   it("(a') in_progress + execution-review WITH verdict FAIL → in_progress (resolved, not pending)", () => {
@@ -452,7 +460,7 @@ describe("buildTicket — in_review means review PENDING NOW, not ever (#1304)",
     expect(t.column).toBe("in_progress");
   });
 
-  it("(e) in_progress + execution-review no verdict but artifact Decision: PASS → in_progress (fallback resolves)", () => {
+  it("(e) in_progress + execution-review no verdict but artifact Decision: PASS → in_review (fallback resolves non-fail, monotonic — #1410)", () => {
     const artifact = writeArtifact(
       "exec-review-pass.md",
       "# Execution review\n\nLooks good.\n\nDecision: PASS\n"
@@ -462,10 +470,10 @@ describe("buildTicket — in_review means review PENDING NOW, not ever (#1304)",
       [{ role: "execution-review", ts: "2026-06-27T05:00:00.000Z", artifact_path: artifact }],
       1
     );
-    expect(t.column).toBe("in_progress");
+    expect(t.column).toBe("in_review");
   });
 
-  it("(f) two execution-reviews, older pending + newer resolved → in_progress (newest-wins)", () => {
+  it("(f) two execution-reviews, older pending + newer resolved PASS → in_review (newest-wins, monotonic — #1410)", () => {
     const t = buildTicket(
       baseTask({ status: "in_progress" }),
       [
@@ -474,7 +482,7 @@ describe("buildTicket — in_review means review PENDING NOW, not ever (#1304)",
       ],
       1
     );
-    expect(t.column).toBe("in_progress");
+    expect(t.column).toBe("in_review");
   });
 
   it("(g) two execution-reviews, older resolved FAIL + newer pending → in_review (newest pending)", () => {
@@ -501,7 +509,7 @@ describe("buildTicket — in_review means review PENDING NOW, not ever (#1304)",
     expect(t.column).toBe("in_review");
   });
 
-  it("equal-ts tiebreak: last-in-array-order wins — [pending, resolved] → in_progress (MINOR-1)", () => {
+  it("equal-ts tiebreak: last-in-array-order wins — [pending, resolved PASS] → in_review (MINOR-1; monotonic — #1410)", () => {
     const t = buildTicket(
       baseTask({ status: "in_progress" }),
       [
@@ -510,7 +518,7 @@ describe("buildTicket — in_review means review PENDING NOW, not ever (#1304)",
       ],
       1
     );
-    expect(t.column).toBe("in_progress");
+    expect(t.column).toBe("in_review");
   });
 
   it("all-NaN ts tiebreak: last-in-array-order wins — [resolved, pending] → in_review (MINOR-1)", () => {

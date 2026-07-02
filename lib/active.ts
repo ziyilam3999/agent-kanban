@@ -13,7 +13,7 @@
 // while it was genuinely touched within the (widened) window, for parallel work.
 
 import type { Ticket } from "./board-schema";
-import { PIPELINE_ROLES } from "./ui-meta";
+import { PIPELINE_ROLES, isFailClassVerdict, shippingAfterPass } from "./ui-meta";
 
 /** A ticket is "active" when its session is live and updated within this window
  *  — widened from 3 min because the file-mtime touch cadence is coarse. The
@@ -40,12 +40,10 @@ export const INFLIGHT_LANE_CAP_MS = 6 * 60 * 60 * 1000;
 /** The canonical pipeline roles as a set (orchestrator is NOT a member). */
 const PIPELINE_ROLE_SET = new Set<string>(PIPELINE_ROLES);
 
-/**
- * Fail-class review verdicts — mirrors verdictHue's severe class in
- * lib/ui-meta.ts (keep the two in sync). A FAIL/BLOCK/REJECT execution-review
- * does NOT complete the chain: the chain must run again.
- */
-const FAIL_CLASS_RE = /BLOCK|FAIL|REJECT/i;
+// Fail-class review verdicts come from the ONE shared predicate in
+// lib/ui-meta.ts (isFailClassVerdict, #1410) — no local regex to keep in sync.
+// A FAIL/BLOCK/REJECT execution-review does NOT complete the chain: the chain
+// must run again.
 
 /**
  * TRUE when a ticket's 3-role chain is STARTED-BUT-UNFINISHED — punched IN but
@@ -79,13 +77,14 @@ export function chainInFlight(t: Ticket): boolean {
   if (newestExecReview === undefined) return true; // punched IN, no review yet
   const verdict = (newestExecReview.verdict ?? "").trim();
   if (verdict === "") return true; // unresolved review — still in flight
-  return FAIL_CLASS_RE.test(verdict); // fail-class stays in-flight; PASS completes
+  return isFailClassVerdict(verdict); // fail-class stays in-flight; PASS completes
 }
 
 /**
  * The set of ticket ids that should render the "actively in progress" heartbeat.
  *
- * Three disjuncts over the in_progress tickets of a LIVE session (#1403):
+ * Three disjuncts over the lane population of a LIVE session — the in_progress
+ * tickets plus passed-and-shipping REVIEW-column tickets (#1403, #1410):
  *   1. IN-FLIGHT: chainInFlight(t) AND its last observable event is within
  *      `inflightCapMs` — chain state, not recency, so a chain survives a long
  *      silent executor leg.
@@ -101,7 +100,9 @@ export function chainInFlight(t: Ticket): boolean {
  *      demoted-from-focus fresh rider stays lit via this window for 8 minutes
  *      (the accepted, pinned transient).
  *
- * @param tickets       the visible tickets (any columns; only in_progress matter)
+ * @param tickets       the visible tickets (any columns; only the lane population
+ *                      matters — in_progress tickets plus passed-and-shipping
+ *                      REVIEW-column tickets, see the filter note below)
  * @param isLive        whether the current session is live (idle session → none)
  * @param nowMs         wall-clock now (ms epoch)
  * @param windowMs      the "recently touched" window for secondary/parallel tickets
@@ -117,7 +118,17 @@ export function computeActiveIds(
   const active = new Set<string>();
   if (!isLive) return active;
 
-  const inProgress = tickets.filter((t) => t.column === "in_progress");
+  // Lane population (#1410): in_progress tickets PLUS passed-and-shipping
+  // tickets — a resolved-PASS execution review now moves the card's COLUMN to
+  // in_review for the ship tail (monotonic flow), but its lane semantics must
+  // not change, so the shipping disjunct keeps it lane-eligible. This is
+  // master-equivalent for all-valid-ts exec-review ledgers (and all-NaN
+  // ledgers); a mixed valid/NaN ledger can diverge — see the mixed-ts pin in
+  // monotonic-flow.test.ts. Revisit this filter if a future Column value is
+  // ever added.
+  const inProgress = tickets.filter(
+    (t) => t.column === "in_progress" || shippingAfterPass(t)
+  );
   if (inProgress.length === 0) return active;
 
   // Disjunct 1 — IN-FLIGHT chains, bounded by the cap. Also gathers the

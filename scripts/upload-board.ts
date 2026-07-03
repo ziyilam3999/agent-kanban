@@ -17,7 +17,6 @@
 // skipped-no-token / failed) BEFORE every exit, success AND non-zero (#1158) — so a
 // background sync is never silent even when the hook swallows the courier's exit.
 
-import { execFileSync } from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -29,6 +28,12 @@ import {
   readSyncLog,
   type SyncRecord,
 } from "../lib/sync-log";
+// The osascript alert channel now lives in the dependency-free lib/notify.ts so the
+// #1435 board-freshness watchdog can reuse the SAME notifier without importing this
+// module (which pulls in @vercel/blob + runs main() on import). Re-exported here so
+// the courier's public surface (and any existing importer) is unchanged.
+import { defaultNotify } from "../lib/notify";
+export { defaultNotify } from "../lib/notify";
 
 /** Minimal structural type for the blob `put` so a test can inject a mock.
  * The courier passes oidcToken+storeId and NO `token` key — the SDK's
@@ -82,26 +87,6 @@ export function consecutiveTrailingFailures(
  */
 export function shouldNotify(consecutive: number): boolean {
   return consecutive >= 3 && consecutive % 3 === 0;
-}
-
-/**
- * Default out-of-band alert: a macOS user notification. The hook wrapper discards
- * the courier's stdio (`nohup … >/dev/null 2>&1 &`), so a log line / console.error
- * is STRUCTURALLY silent — this is the only channel that reaches a human (#1051
- * outage: 3x BlobAccessError logged, board stale ~25 min, zero alert). Best-effort:
- * never throws, no-op off-macOS. Message carries only result/reason tokens.
- */
-export function defaultNotify(title: string, message: string): void {
-  if (process.platform !== "darwin") return;
-  try {
-    execFileSync(
-      "osascript",
-      ["-e", `display notification ${JSON.stringify(message)} with title ${JSON.stringify(title)} sound name "Basso"`],
-      { stdio: "ignore", timeout: 5000 }
-    );
-  } catch {
-    /* best-effort — an alert failure must never break the courier */
-  }
 }
 
 /** After a failure record lands: alert out-of-band if the trailing streak warrants. */

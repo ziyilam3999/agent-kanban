@@ -12,7 +12,8 @@
     "export:board": "tsx scripts/export-board.ts",
     "kanban:handoff": "tsx scripts/handoff-session.ts",
     "kanban:upload": "tsx scripts/upload-board.ts",
-    "kanban:sync": "tsx scripts/export-board.ts && tsx scripts/upload-board.ts"
+    "kanban:sync": "tsx scripts/export-board.ts && tsx scripts/upload-board.ts",
+    "kanban:watchdog": "tsx scripts/board-freshness-watchdog.ts"
   },
   "dependencies": {
     "@vercel/blob": "^2.4.1",

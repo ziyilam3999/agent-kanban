@@ -12,6 +12,19 @@ export const COLUMN_LABELS: Record<Column, string> = {
   done: "Done",
 };
 
+/**
+ * Default "live" window — a session is live iff its last activity is within this.
+ * ONE definition, shared by every consumer: build-board's SessionSummary.live
+ * (re-exports this) AND the card phase-line's SHIPPING→STALE liveness cross-check
+ * (#1449). Lives in this leaf schema module (not build-board) so the client-side
+ * pill logic in ui-meta can reuse it WITHOUT importing build-board — that would
+ * form a ui-meta ↔ build-board require cycle (build-board eagerly reads ui-meta's
+ * PIPELINE_ROLES at load), which silently corrupts build-board's role set when
+ * ui-meta happens to load first. board-schema has no runtime imports, so both
+ * sides depend on it safely.
+ */
+export const LIVE_WINDOW_MS = 5 * 60 * 1000;
+
 /** One role event from the 3-role ledger = one agent comment on a card. */
 export interface LedgerComment {
   /** planner | plan-review | executor | execution-review | orchestrator (free-form tolerated) */

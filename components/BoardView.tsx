@@ -311,6 +311,7 @@ export function BoardView({ initial }: { initial: Board }) {
                           nowMs={now}
                           glow={moved.has(t.id) || fresh.has(t.id)}
                           active={activeIds.has(t.id)}
+                          sessionLastActive={currentSession?.lastActive}
                           reduce={!!reduce}
                         />
                       </motion.button>

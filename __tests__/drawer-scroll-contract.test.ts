@@ -1,15 +1,20 @@
 /**
- * Source-contract guard for the ticket-detail Drawer scroll fix (#1447).
+ * Source-contract tripwire for the ticket-detail Drawer scroll fix (#1447, cycle 2).
  *
- * This is NOT a layout test. jsdom cannot measure real flex layout, so it can
- * never prove that scrolling actually works at runtime. Instead this guard
- * asserts the exact CSS declarations + component props whose ABSENCE was the
- * root cause of the "long ticket clipped, can't scroll" bug — so a future edit
- * that removes any of them regresses the fix and fails here.
- *
- * The real proof that scrolling works is the manual/rendered scroll evidence
- * (mobile-touch + desktop-wheel to the bottom of a long ticket) — see
- * .ai-workspace/reviews/1447-execution-evidence.md.
+ * HONESTY CONTRACT — read before trusting a green run:
+ *  - This is a SOURCE-contract, NOT a layout/runtime test. jsdom cannot measure
+ *    real flex layout or touch-scroll, so it can NEVER prove that scrolling
+ *    actually works at runtime.
+ *  - It asserts the exact `.ak-drawer__body` CSS scroll recipe is PRESENT —
+ *    including this cycle's added `transform: translateZ(0)` iOS scroll-layer
+ *    hint. If any recipe declaration is removed, this tripwire goes RED.
+ *  - The runtime MECHANISM proof is `e2e/drawer-scroll.e2e.spec.ts` (trusted
+ *    CDP touch swipe in chromium). BUT a chromium-green e2e does NOT prove the
+ *    iOS fix — chromium scrolls fine with OR without `translateZ(0)`. The ONLY
+ *    oracle that can prove the fix WORKS on iOS Safari is the operator's real
+ *    iPhone (plan AC14 / close-gate CG5). Chromium-green != iOS-works.
+ *  - This test deliberately makes NO assertion about the drag / swipe-to-dismiss
+ *    config (#1447 cycle 2 holds that constant — single-variable experiment).
  *
  * Reads repo source via join(__dirname, "..") — NO absolute/home-path literals,
  * so the test is portable across clones/worktrees/CI.
@@ -19,10 +24,6 @@ import { join } from "path";
 
 const cssSource = readFileSync(
   join(__dirname, "..", "app", "globals.css"),
-  "utf8"
-);
-const drawerSource = readFileSync(
-  join(__dirname, "..", "components", "Drawer.tsx"),
   "utf8"
 );
 
@@ -38,22 +39,22 @@ function ruleBlock(selector: string): string {
   return m ? m[1] : "";
 }
 
-describe("drawer-scroll-contract (#1447)", () => {
+describe("drawer-scroll-contract (#1447 cycle 2 — recipe-present tripwire)", () => {
   const body = ruleBlock(".ak-drawer__body");
 
   it("finds the .ak-drawer__body rule block", () => {
     expect(body.length).toBeGreaterThan(0);
   });
 
-  it("A1: .ak-drawer__body declares overflow-y: auto", () => {
+  it("declares overflow-y: auto", () => {
     expect(body).toMatch(/overflow-y\s*:\s*auto/);
   });
 
-  it("A1: .ak-drawer__body declares min-height: 0 (THE fix — allow shrink so overflow engages)", () => {
+  it("declares min-height: 0 (allow shrink below content so overflow engages)", () => {
     expect(body).toMatch(/min-height\s*:\s*0/);
   });
 
-  it("A1: .ak-drawer__body declares a GROWING flex (flex-grow >= 1; `flex: 0 0 auto` is rejected)", () => {
+  it("declares a GROWING flex (flex-grow >= 1; `flex: 0 0 auto` is rejected)", () => {
     // Capture the flex-grow: either `flex: <grow> ...` shorthand or `flex-grow: <n>`.
     const shorthand = body.match(/flex\s*:\s*(\d+)/);
     const longhand = body.match(/flex-grow\s*:\s*(\d+)/);
@@ -66,15 +67,17 @@ describe("drawer-scroll-contract (#1447)", () => {
     expect(grow).toBeGreaterThanOrEqual(1);
   });
 
-  it("A2: .ak-drawer__body declares overscroll-behavior: contain", () => {
+  it("declares overscroll-behavior: contain", () => {
     expect(body).toMatch(/overscroll-behavior\s*:\s*contain/);
   });
 
-  it("A5: Drawer.tsx imports/uses useDragControls", () => {
-    expect(drawerSource).toMatch(/useDragControls/);
+  it("declares -webkit-overflow-scrolling: touch (iOS momentum scroll)", () => {
+    expect(body).toMatch(/-webkit-overflow-scrolling\s*:\s*touch/);
   });
 
-  it("A5: Drawer.tsx sets dragListener={false} (grip-only drag — restores native touch-scroll)", () => {
-    expect(drawerSource).toMatch(/dragListener=\{false\}/);
+  it("declares transform: translateZ(0) (THIS cycle's iOS scroll-layer fix — tripwire)", () => {
+    // The single-variable fix: promotes the overflow region onto its own iOS
+    // touch-scroll/compositing layer. RED if anyone strips this cycle's fix.
+    expect(body).toMatch(/transform\s*:\s*translateZ\(\s*0\s*\)/);
   });
 });

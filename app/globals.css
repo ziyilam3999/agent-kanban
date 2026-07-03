@@ -1029,6 +1029,7 @@ button {
   overflow-y: auto;
   overscroll-behavior: contain; /* don't chain scroll to the page behind */
   -webkit-overflow-scrolling: touch; /* momentum scroll on iOS */
+  transform: translateZ(0); /* iOS: force the overflow region onto its own touch-scroll/compositing layer (single-variable fix — #1447 cycle 2) */
   padding: 14px 16px 26px;
 }
 

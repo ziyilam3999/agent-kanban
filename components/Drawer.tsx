@@ -1,13 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import {
-  AnimatePresence,
-  motion,
-  useDragControls,
-  useReducedMotion,
-  type PanInfo,
-} from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { Ticket } from "@/lib/board-schema";
 import { COLUMN_LABELS } from "@/lib/board-schema";
 import {
@@ -39,9 +33,14 @@ function localClock(iso: string): string {
 /** Bottom-sheet (mobile) / side panel (desktop) showing one ticket's black-box log. */
 export function Drawer({ ticket, nowMs, onClose }: DrawerProps) {
   const reduce = useReducedMotion();
-  const controls = useDragControls();
   const sheetRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const gripRef = useRef<HTMLSpanElement>(null);
+  // Keep the latest onClose without re-subscribing the grip listeners on every
+  // parent render (onClose is an inline arrow in BoardView — new identity each
+  // render), so the grip effect can depend only on [ticket, reduce].
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   // Lock scroll, focus the close button, ESC + focus-trap while open.
   useEffect(() => {
@@ -84,9 +83,49 @@ export function Drawer({ ticket, nowMs, onClose }: DrawerProps) {
     };
   }, [ticket, onClose]);
 
-  function onDragEnd(_e: unknown, info: PanInfo) {
-    if (info.offset.y > 90 || info.velocity.y > 600) onClose();
-  }
+  // Grip-only native swipe-to-dismiss (replaces the removed Framer-Motion drag).
+  // The dismiss gesture lives ENTIRELY on the grip via native pointer listeners
+  // bound to the grip element — NO pointer/touch listener is ever attached to
+  // the body subtree or the sheet, so the body's native scroll is never
+  // intercepted (the cycle-3 root-cause fix, #1447). Native listeners (not React
+  // synthetic `onPointer*` props) are used deliberately: React's root-delegated
+  // pointerup can miss the release after `setPointerCapture`, whereas a listener
+  // bound directly on the captured grip element sees every event on every engine.
+  // A press records the start Y + captures the pointer; a downward release past
+  // the threshold closes the drawer. ✕ / scrim-tap / Escape stay the accessible
+  // dismiss floor. Reduced-motion disables the swipe (the entrance is a fade).
+  useEffect(() => {
+    const grip = gripRef.current;
+    if (!ticket || !grip || reduce) return;
+    const DISMISS_THRESHOLD_PX = 90; // matches the old drag's `offset.y > 90`
+    let startY: number | null = null;
+    function onPointerDown(e: PointerEvent) {
+      startY = e.clientY;
+      try {
+        grip!.setPointerCapture(e.pointerId);
+      } catch {
+        // setPointerCapture can throw if the pointer is already gone — harmless.
+      }
+    }
+    function onPointerUp(e: PointerEvent) {
+      const start = startY;
+      startY = null;
+      if (start != null && e.clientY - start > DISMISS_THRESHOLD_PX) {
+        onCloseRef.current();
+      }
+    }
+    function onPointerCancel() {
+      startY = null;
+    }
+    grip.addEventListener("pointerdown", onPointerDown);
+    grip.addEventListener("pointerup", onPointerUp);
+    grip.addEventListener("pointercancel", onPointerCancel);
+    return () => {
+      grip.removeEventListener("pointerdown", onPointerDown);
+      grip.removeEventListener("pointerup", onPointerUp);
+      grip.removeEventListener("pointercancel", onPointerCancel);
+    };
+  }, [ticket, reduce]);
 
   return (
     <AnimatePresence>
@@ -112,20 +151,10 @@ export function Drawer({ ticket, nowMs, onClose }: DrawerProps) {
             transition={
               reduce ? { duration: 0 } : { type: "spring", damping: 32, stiffness: 320 }
             }
-            drag={reduce ? false : "y"}
-            dragControls={controls}
-            dragListener={false}
-            dragConstraints={{ top: 0, bottom: 0 }}
-            dragElastic={{ top: 0, bottom: 0.4 }}
-            onDragEnd={onDragEnd}
           >
-            <span
-              className="ak-drawer__grip"
-              aria-hidden
-              onPointerDown={(e) => {
-                if (!reduce) controls.start(e);
-              }}
-            />
+            {/* Grip: swipe-to-dismiss is wired via native pointer listeners in
+                the effect above (grip-only; never on the scroll body). */}
+            <span ref={gripRef} className="ak-drawer__grip" aria-hidden />
 
             <div className="ak-drawer__head">
               <span className="ak-drawer__id">#{ticket.id}</span>

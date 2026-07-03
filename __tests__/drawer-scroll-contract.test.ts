@@ -108,4 +108,19 @@ describe("drawer-scroll-contract (#1447)", () => {
     // overflow-wrap guards a spaceless mega-token from forcing horizontal overflow.
     expect(title).toMatch(/overflow-wrap\s*:\s*anywhere/);
   });
+
+  // --- #1455 pull-down-from-top drag-to-dismiss wiring fence. This is a SOURCE
+  // fence, not behavioural proof (cairn line 106) — the behavioural proof is the
+  // Playwright oracle at e2e/drawer-pulldown-dismiss.e2e.spec.ts (Cases A-D). This
+  // guard only certifies the wiring hasn't been silently deleted: the stable
+  // sentinel marker the e2e's pullBody() helper targets, AND a live scrollTop gate
+  // in the body-touch handling. Deleting either turns this suite RED.
+
+  it("A6 (pull-down wiring fence): Drawer.tsx renders the stable sentinel `data-ak-pulldown` on the scroll body", () => {
+    expect(drawerSource).toMatch(/data-ak-pulldown/);
+  });
+
+  it("A6 (pull-down wiring fence): Drawer.tsx gates the body pull-down gesture on a live `scrollTop` read", () => {
+    expect(drawerSource).toMatch(/scrollTop/);
+  });
 });

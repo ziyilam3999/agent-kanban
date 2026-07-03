@@ -17,7 +17,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { buildTicket, type RawTask, type RawLedgerLine } from "@/lib/build-board";
 import { computeActiveIds, chainInFlight } from "@/lib/active";
 import { deriveLanes } from "@/lib/lanes";
-import { phaseLine, shippingAfterPass } from "@/lib/ui-meta";
+import { phaseLine, shippingAfterPass, SHIPPING_STALE_MS } from "@/lib/ui-meta";
 import { Card } from "@/components/Card";
 import type { Ticket } from "@/lib/board-schema";
 
@@ -193,14 +193,28 @@ describe("#1410 AC-6 — the verdict-token shipping pill", () => {
 });
 
 describe("#1410 AC-7 — zombie bound (client-computed stale badge)", () => {
-  it("shipping ticket 2 h old → ✓ PASS — STALE (dim)", () => {
-    const p = phaseLine(shippingTicket(NOW - 120 * MIN), false, NOW);
+  // #1449: STALE is now a CONJUNCTION (age > cap AND session definitively dead).
+  // These two zombie-bound cases pass an explicit DEAD-session lastActive (2 h ago,
+  // far outside LIVE_WINDOW_MS) so they still assert STALE — the intent "a dead
+  // session's old ship is STALE" is preserved, not weakened. Without a liveness
+  // signal the pill now fails closed to SHIPPING (see the #1449 describe block in
+  // phase.test.ts), which is why these call sites MUST supply the dead signal.
+  const DEAD_SESSION = NOW - 120 * MIN; // last active 2 h ago → not live
+
+  it("shipping ticket 2 h old + owning session DEAD → ✓ PASS — STALE (dim)", () => {
+    const p = phaseLine(
+      shippingTicket(NOW - 120 * MIN),
+      false,
+      NOW,
+      SHIPPING_STALE_MS,
+      DEAD_SESSION
+    );
     expect(p.text).toBe("✓ PASS — STALE");
     expect(p.hueVar).toBe("var(--fg-dim)");
   });
 
-  it("cap is an honored parameter: shippingStaleCapMs = 60_000 flips the fresh (2-min) fixture stale", () => {
-    const p = phaseLine(shippingTicket(NOW - 2 * MIN), false, NOW, 60_000);
+  it("cap is an honored parameter: shippingStaleCapMs = 60_000 flips the fresh (2-min) fixture stale (session DEAD)", () => {
+    const p = phaseLine(shippingTicket(NOW - 2 * MIN), false, NOW, 60_000, DEAD_SESSION);
     expect(p.text).toBe("✓ PASS — STALE");
     expect(p.hueVar).toBe("var(--fg-dim)");
   });

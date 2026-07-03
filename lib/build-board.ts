@@ -18,13 +18,16 @@ import type {
   SessionSummary,
   Ticket,
 } from "./board-schema";
+import { LIVE_WINDOW_MS } from "./board-schema";
 import { PIPELINE_ROLES, isFailClassVerdict } from "./ui-meta";
 
 /** The canonical pipeline roles as a set (orchestrator is NOT a member). */
 const PIPELINE_ROLE_SET = new Set<string>(PIPELINE_ROLES);
 
-/** Default "live" window — a session is live if its last activity is within this. */
-export const LIVE_WINDOW_MS = 5 * 60 * 1000;
+// The live window now has ONE definition in the leaf board-schema module (#1449 —
+// so the client pill in ui-meta can reuse it without a require cycle). Re-exported
+// here so existing `@/lib/build-board` importers of LIVE_WINDOW_MS keep working.
+export { LIVE_WINDOW_MS };
 
 /** Raw task as stored in ~/.claude/tasks/<session>/<id>.json. */
 export interface RawTask {

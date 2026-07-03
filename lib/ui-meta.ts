@@ -3,6 +3,7 @@
 // agree on colors and the canonical 4-role pipeline order.
 
 import type { Column, Ticket } from "./board-schema";
+import { LIVE_WINDOW_MS } from "./board-schema";
 
 /** CSS-var hue per column — the thin status rail + count tint, never a fill. */
 export const COLUMN_HUE: Record<Column, string> = {
@@ -164,8 +165,9 @@ export interface PhaseLine {
  *                 "▶ WORKING" (mint) when `active`, "▶ STARTED" (cyan) when not
  *   in_review   → shipping (passed review, ship tail running — #1410):
  *                 "✓ <VERDICT> — SHIPPING" (green), dimming to
- *                 "✓ <VERDICT> — STALE" once `nowMs - updatedAt` exceeds
- *                 `shippingStaleCapMs`; otherwise the pending/fail path:
+ *                 "✓ <VERDICT> — STALE" ONLY when board-write age exceeds
+ *                 `shippingStaleCapMs` AND the owning session is definitively
+ *                 not live (#1449 — see below); otherwise the pending/fail path:
  *                 "◆ REVIEW · <VERDICT>" (hue by verdict severity), else "◆ REVIEW"
  *   done        → "✓ DONE" plus " · <VERDICT>" when a review verdict exists
  *
@@ -177,12 +179,25 @@ export interface PhaseLine {
  * omitted the shipping pill never goes stale (back-compat). The staleness is
  * client-derived so it advances each poll even on a frozen (edge-driven)
  * snapshot — a server-side decay would freeze exactly when an orchestrator dies.
+ *
+ * `sessionLastActive` (optional, #1449) is the owning session's `lastActive` epoch
+ * — the board's INDEPENDENT liveness signal (folds the <session>.beat heartbeat
+ * that every ship-tail Bash step touches, so it keeps advancing during a quiet
+ * ship tail while a single card's `updatedAt` does not). STALE is now a
+ * CONJUNCTION: age > cap AND the session is definitively not live
+ * (`nowMs - sessionLastActive > LIVE_WINDOW_MS`, the board's single definition of
+ * "live", reused). Bias rules — a live session's card is NEVER stale, and UNKNOWN
+ * liveness (this arg omitted, or nowMs omitted) FAILS CLOSED to SHIPPING: the pill
+ * never cries wolf; the #1435 external watchdog is the real net for ships that die.
+ * Deriving from the epoch (not a server `live` boolean) keeps this freeze-safe — a
+ * genuinely-dead session on a frozen snapshot still reaches STALE as `nowMs` runs.
  */
 export function phaseLine(
   ticket: Ticket,
   active = false,
   nowMs?: number,
-  shippingStaleCapMs = SHIPPING_STALE_MS
+  shippingStaleCapMs = SHIPPING_STALE_MS,
+  sessionLastActive?: number
 ): PhaseLine {
   switch (ticket.column) {
     case "todo":
@@ -224,8 +239,18 @@ export function phaseLine(
         for (const c of ticket.comments) {
           if (c.role === "execution-review" && c.verdict) v = c.verdict;
         }
-        const stale =
+        // STALE is a CONJUNCTION (#1449): the card's board-write age exceeds the
+        // cap AND its owning session is DEFINITIVELY not live. A live session (or
+        // UNKNOWN liveness — no session signal, or no clock) fails CLOSED to
+        // SHIPPING so the pill never cries wolf on an actively-shipped card whose
+        // quiet ship tail hasn't touched THIS card's updatedAt.
+        const ageExceedsCap =
           nowMs !== undefined && nowMs - ticket.updatedAt > shippingStaleCapMs;
+        const sessionDefinitelyDead =
+          nowMs !== undefined &&
+          sessionLastActive !== undefined &&
+          nowMs - sessionLastActive > LIVE_WINDOW_MS;
+        const stale = ageExceedsCap && sessionDefinitelyDead;
         return stale
           ? {
               text: `✓ ${v} — STALE`,

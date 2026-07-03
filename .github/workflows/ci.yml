@@ -61,23 +61,49 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Fail-closed guard for a STANDALONE (non-pipeline) command.
+          # rc 1 = clean (return); rc 0 = forbidden content found (FAIL); rc>=2 = check
+          # errored — e.g. a fatal git pathspec error — and MUST fail closed, never pass.
+          fail_closed_grep() {  # $1=human label, rest=the standalone command to run
+            local label="$1"; shift; local rc=0
+            "$@" || rc=$?
+            if [ "$rc" -eq 0 ]; then
+              echo "ERROR ($label): forbidden content is committed."
+              exit 1
+            elif [ "$rc" -ge 2 ]; then
+              echo "ERROR ($label): check failed to RUN (rc=$rc) — failing closed. A gate that cannot run must never pass."
+              exit 1
+            fi
+          }
+
           # Home-path class (no hard-coded username): /Users/<name>/, /home/<name>/, C:/Users/<name>/
           # __tests__ is exempt: the redaction unit tests MUST carry synthetic home-path-shaped
           # fixtures (e.g. /Users/alice/) as inputs to prove redact() strips them — those are
           # fictional placeholders, never a real operator path (the real data file is gitignored).
-          if git grep -nIE '(/Users/|/home/|[A-Za-z]:[\\/]Users[\\/])[A-Za-z0-9._-]+/' -- . ':!*.example' ':!.github/workflows/ci.yml' ':!__tests__/*'; then
-            echo "ERROR: a home path is committed. Use os.homedir() / ~ — never an absolute home path."
-            exit 1
-          fi
+          # Long-form :(exclude)... pathspecs — the short-form bang-exclude shorthand is
+          # avoided here because this git version chokes fatal on a short-form exclude
+          # whose leading char is a symbol/underscore,
+          # and fail_closed_grep is what turns that fatal into a loud CI failure instead of
+          # a silently-swallowed pass.
+          fail_closed_grep "home-path" \
+            git grep -nIE '(/Users/|/home/|[A-Za-z]:[\\/]Users[\\/])[A-Za-z0-9._-]+/' -- . ':(exclude)*.example' ':(exclude).github/workflows/ci.yml' ':(exclude)__tests__/*'
+          echo "privacy home-path check OK: rc=1 (no home paths in tracked non-test files)."
+
           # Flag ANY tracked board snapshot/backup under data/ except the synthetic sample.
-          if git ls-files 'data/*' | grep -E 'board' | grep -vE '(^|/)board\.sample\.json$'; then
-            echo "ERROR: a board data snapshot/backup is tracked under data/. It must stay gitignored (private data)."
-            exit 1
-          fi
-          if git ls-files | grep -E '(^|/)board\.json$|\.board\.json$|\.private-bak$'; then
-            echo "ERROR: a board data snapshot is tracked. It must stay gitignored (private data)."
-            exit 1
-          fi
+          # The git producer is captured STANDALONE (not piped into grep) so a fatal git error
+          # fails this step loudly instead of being masked by pipefail + a downstream grep's
+          # unrelated no-match rc — see the two `grep <pattern> ... || true` lines below, which
+          # run over the already-captured STATIC string, not a live git process.
+          tracked="$(git ls-files 'data/*')" || { echo "ERROR (data-snapshot): git ls-files failed to RUN (rc=$?) — failing closed."; exit 1; }
+          offenders="$(printf '%s\n' "$tracked" | grep -E 'board' | grep -vE '(^|/)board\.sample\.json$' || true)"
+          [ -z "$offenders" ] || { echo "ERROR (data-snapshot): a board data snapshot/backup is tracked under data/ (must stay gitignored — private data): $offenders"; exit 1; }
+
+          # Flag ANY tracked board.json / *.board.json / *.private-bak anywhere in the repo.
+          # Same standalone-capture shape as above — no git producer left inside a pipe.
+          tracked_all="$(git ls-files)" || { echo "ERROR (board-json): git ls-files failed to RUN (rc=$?) — failing closed."; exit 1; }
+          offenders="$(printf '%s\n' "$tracked_all" | grep -E '(^|/)board\.json$|\.board\.json$|\.private-bak$' || true)"
+          [ -z "$offenders" ] || { echo "ERROR (board-json): a board data snapshot is tracked (must stay gitignored — private data): $offenders"; exit 1; }
+
           echo "privacy gate OK: no home paths, no tracked board snapshots."
       # The synthetic sample is the ONE tracked board file, so the gate above can't see
       # a real capture written OVER it. Shape-guard: the real board is always dozens of

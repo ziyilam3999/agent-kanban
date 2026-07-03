@@ -1,0 +1,74 @@
+===================================================================
+#1457 -- CI privacy grep fail-closed: RED -> GREEN evidence transcript
+Run at: 2026-07-03T15:23:14Z | shell: bash 3.2.57(1)-release | git: git version 2.54.0
+Fixture: fresh git init, planted /Users/alice/example/data leak in
+src/config.js, synthetic /Users/bob/x bait in __tests__/redact.test.js
+===================================================================
+
+----- Fixture RED (demonstrates the bug) -----
+
+$ git grep -nIE "$PAT" -- . ':!*.example' ':!.github/workflows/ci.yml' ':!__tests__/*'; echo "raw rc=$?"
+fatal: Unimplemented pathspec magic '_' in ':!__tests__/*'
+raw rc=128
+
+$ if git grep -nIE "$PAT" -- . ':!__tests__/*'; then echo CAUGHT; else echo PASSED-VACUOUSLY; fi
+fatal: Unimplemented pathspec magic '_' in ':!__tests__/*'
+PASSED-VACUOUSLY
+
+----- Fixture GREEN (demonstrates the fix) -----
+
+Step 3: NEW rc-checked long-form, leak PRESENT
+$ rc=0; git grep -nIE "$PAT" -- . ':(exclude)*.example' ':(exclude).github/workflows/ci.yml' ':(exclude)__tests__/*' || rc=$?; echo "rc=$rc"
+src/config.js:1:module.exports = { path: "/Users/alice/example/data" };
+rc=0
+
+Step 4: remove planted leak, commit, re-run same NEW command
+$ rc=0; git grep -nIE "$PAT" -- . ':(exclude)*.example' ':(exclude).github/workflows/ci.yml' ':(exclude)__tests__/*' || rc=$?; echo "rc=$rc"
+rc=1
+(no findings printed above the rc= line -> __tests__/redact.test.js correctly excluded)
+
+----- Pipeline-masking RED -> GREEN (for the two ls-files checks; shell: bash) -----
+
+RED: masked pipeline -- || rc=$? on a pipe is blind to the producer fatal
+$ set -o pipefail; rc=0; ( echo x; exit 128 ) | grep -q NOMATCH || rc=$?; echo "rc=$rc"
+rc=1
+
+GREEN-A: ${PIPESTATUS[0]} read as the IMMEDIATE next statement
+$ ( echo x; exit 128 ) | grep -q NOMATCH; echo "producer=${PIPESTATUS[0]}"
+producer=128
+
+GREEN-B: standalone capture (the recommended, shell-portable form used in the fix)
+$ out="$(bash -c 'echo x; exit 128')" || echo "fail-closed rc=$?"
+fail-closed rc=128
+
+===================================================================
+SUMMARY:
+  Fixture RED   : raw rc=128 (fatal pathspec), wrapper -> PASSED-VACUOUSLY (bug reproduced)
+  Fixture GREEN : leak present -> rc=0 (caught); leak removed -> rc=1 (clean, __tests__ excluded)
+  Pipeline RED  : masked pipe -> rc=1 (producer's fatal 128 is masked; an rc>=2 arm can never fire)
+  Pipeline GREEN: PIPESTATUS -> producer=128; standalone-capture -> fail-closed rc=128 (surfaced)
+===================================================================
+
+===================================================================
+EXTRA: end-to-end integration test of the ACTUAL extracted ci.yml
+privacy step script (not just the raw commands) against a synthetic
+repo mimicking agent-kanban's layout (data/board.sample.json exempt).
+===================================================================
+
+Run 1: clean tree -> exit 0
+  privacy home-path check OK: rc=1 (no home paths in tracked non-test files).
+  privacy gate OK: no home paths, no tracked board snapshots.
+  exit=0
+
+Plant data/board.backup.json -> caught, exit 1
+  ERROR (data-snapshot): a board data snapshot/backup is tracked under data/ ...: data/board.backup.json
+  exit=1
+
+Remove offender -> exit 0 again
+
+Plant board.json (repo root) -> caught, exit 1
+  ERROR (board-json): a board data snapshot is tracked ...: board.json
+  exit=1
+
+board.sample.json never flagged throughout (exemption preserved).
+===================================================================

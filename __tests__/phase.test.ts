@@ -138,6 +138,55 @@ describe("latestReviewVerdict", () => {
   });
 });
 
+describe("#1449 SHIPPING→STALE pill cross-checks owning-session liveness (stop crying wolf)", () => {
+  // A passed-review ticket in the ship tail: in_review column, in_progress status,
+  // newest exec-review carries a non-fail verdict → shippingAfterPass() true. Its
+  // updatedAt is 2 h old, so the AGE gate is ALWAYS tripped — only the liveness
+  // cross-check decides SHIPPING vs STALE across the three cases below.
+  const NOW = Date.parse("2026-07-03T12:00:00.000Z");
+  const MIN = 60 * 1000;
+
+  const oldShippingTicket = (): Ticket => ({
+    id: "100",
+    subject: "Ship the thing",
+    description: "",
+    column: "in_review",
+    status: "in_progress",
+    blockedBy: [],
+    comments: [
+      { role: "executor", ts: "2026-07-03T04:00:00.000Z" },
+      { role: "execution-review", ts: "2026-07-03T05:00:00.000Z", verdict: "PASS" },
+    ],
+    updatedAt: NOW - 120 * MIN, // 2 h quiet on the board → age gate always tripped
+  });
+
+  it("case 1 (RED-first): old shipping card whose owning session is LIVE → SHIPPING, not STALE", () => {
+    // Session last active 1 min ago → inside the 5-min live window → live. Against
+    // today's age-only pill this returns STALE (the false-positive #1449 kills);
+    // the liveness conjunction greens it to SHIPPING. (RED→GREEN proof, AC-4.)
+    const p = phaseLine(oldShippingTicket(), false, NOW, undefined, NOW - 1 * MIN);
+    expect(p.text).toBe("✓ PASS — SHIPPING");
+    expect(p.hueVar).toBe("var(--done)");
+  });
+
+  it("case 2 (still dims): old shipping card whose owning session is DEAD/not-live → STALE", () => {
+    // Session last active 2 h ago → far outside the live window → definitively
+    // dead. Proves the fix did NOT simply disable the pill — a real zombie ship
+    // still dims to STALE.
+    const p = phaseLine(oldShippingTicket(), false, NOW, undefined, NOW - 120 * MIN);
+    expect(p.text).toBe("✓ PASS — STALE");
+    expect(p.hueVar).toBe("var(--fg-dim)");
+  });
+
+  it("case 3 (fail-closed): old shipping card with UNKNOWN liveness (no session signal) → SHIPPING", () => {
+    // No sessionLastActive arg → liveness unresolvable → fail closed to SHIPPING.
+    // Never cry wolf on ambiguity; the #1435 external watchdog covers genuine death.
+    const p = phaseLine(oldShippingTicket(), false, NOW);
+    expect(p.text).toBe("✓ PASS — SHIPPING");
+    expect(p.hueVar).toBe("var(--done)");
+  });
+});
+
 describe("verdictHue precedence (shared, byte-identical to the drawer)", () => {
   it("BLOCK/FAIL/REJECT → red", () => {
     expect(verdictHue("BLOCK")).toBe("var(--err)");

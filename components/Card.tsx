@@ -20,13 +20,18 @@ interface CardProps {
   /** True while this ticket is the agent's CURRENT focus (live session +
    *  in_progress + touched recently) — drives the persistent "working" heartbeat. */
   active?: boolean;
+  /** Owning session's `lastActive` epoch (#1449) — the independent liveness signal
+   *  the SHIPPING→STALE pill cross-checks so an actively-shipped card whose quiet
+   *  ship tail hasn't touched its own `updatedAt` is not falsely dimmed to STALE.
+   *  Optional: omitted → UNKNOWN liveness → the pill fails closed to SHIPPING. */
+  sessionLastActive?: number;
   reduce?: boolean;
 }
 
 /** Telemetry tile — left hue rail, id + role pips, clamped subject, blocked/time footer. */
-export function Card({ ticket, nowMs, glow, active, reduce }: CardProps) {
+export function Card({ ticket, nowMs, glow, active, sessionLastActive, reduce }: CardProps) {
   const hue = COLUMN_HUE[ticket.column];
-  const phase = phaseLine(ticket, active, nowMs);
+  const phase = phaseLine(ticket, active, nowMs, undefined, sessionLastActive);
   const rolesSeen = new Set(ticket.comments.map((c) => c.role));
   const blocked = ticket.blockedBy.length > 0;
   // Lift a leading "[#1063]" / "[EPIC]" prefix out of the subject so it doesn't read as a

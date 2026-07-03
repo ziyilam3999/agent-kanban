@@ -949,8 +949,13 @@ button {
   height: 4px;
   border-radius: 2px;
   background: var(--line);
-  margin: 9px auto 2px;
+  background-clip: content-box; /* bar shows only in content box; padding = invisible hit area */
+  box-sizing: content-box;
+  padding: 11px 22px; /* comfortable ~26px-tall / 82px-wide tap zone; bar stays 4px */
+  margin: 0 auto; /* padding now supplies the vertical spacing (was 9px 2px) */
   flex: 0 0 auto;
+  cursor: grab;
+  touch-action: none; /* press on the grip starts dismiss-drag, not a scroll */
 }
 
 .ak-drawer__head {
@@ -959,6 +964,7 @@ button {
   gap: 10px;
   padding: 8px 16px 12px;
   border-bottom: 1px solid var(--line);
+  flex: 0 0 auto; /* pin the header so only the body scrolls */
 }
 
 .ak-drawer__id {
@@ -1018,7 +1024,11 @@ button {
 }
 
 .ak-drawer__body {
+  flex: 1 1 auto; /* grow/shrink to fill the bounded column */
+  min-height: 0; /* THE fix — allow shrink below content so overflow engages */
   overflow-y: auto;
+  overscroll-behavior: contain; /* don't chain scroll to the page behind */
+  -webkit-overflow-scrolling: touch; /* momentum scroll on iOS */
   padding: 14px 16px 26px;
 }
 

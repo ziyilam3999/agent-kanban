@@ -129,7 +129,6 @@ export function Drawer({ ticket, nowMs, onClose }: DrawerProps) {
 
             <div className="ak-drawer__head">
               <span className="ak-drawer__id">#{ticket.id}</span>
-              <h2 className="ak-drawer__subject">{ticket.subject}</h2>
               <span
                 className="ak-chip"
                 style={{ ["--hue" as string]: COLUMN_HUE[ticket.column] }}
@@ -148,6 +147,11 @@ export function Drawer({ ticket, nowMs, onClose }: DrawerProps) {
             </div>
 
             <div className="ak-drawer__body">
+              {/* Hero title — first block of the SCROLL body. Relocated out of the
+                  pinned head (#1447 Option B) so a pathologically long subject only
+                  makes the body taller (and scrollable), never starves it. */}
+              <h2 className="ak-drawer__title">{ticket.subject}</h2>
+
               {ticket.description && (
                 <p className="ak-drawer__desc">{ticket.description}</p>
               )}

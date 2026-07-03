@@ -27,6 +27,13 @@ interface BuildOpts {
   liveLanes: number;
   /** Whether the session is live — false => activeIds empty => zero lanes, no counter. */
   live?: boolean;
+  /**
+   * Optional extra CARD ticket carrying a chosen (possibly pathologically long)
+   * subject, appended in the `todo` column so it renders as a clickable `.ak-cardbtn`
+   * without joining the live lanes. Undefined for existing callers => ticket count
+   * unchanged (back-compat: live-swimlanes still sees exactly liveLanes + 3 cards).
+   */
+  longSubjectTicket?: { id: string; subject: string };
 }
 
 /**
@@ -35,7 +42,7 @@ interface BuildOpts {
  * column board always has content. With `live:false` the session is idle so
  * computeActiveIds returns the empty set (k=0 — counter absent).
  */
-export function buildBoard({ liveLanes, live = true }: BuildOpts): Board {
+export function buildBoard({ liveLanes, live = true, longSubjectTicket }: BuildOpts): Board {
   const now = Date.now();
   const tickets: Ticket[] = [];
 
@@ -71,6 +78,23 @@ export function buildBoard({ liveLanes, live = true }: BuildOpts): Board {
       blockedBy: [],
       comments: [],
       updatedAt: now - 30 * 60_000, // old: never counts as a live lane
+      sessionId: SESSION_ID,
+    });
+  }
+
+  // Optional long-subject card (the #1447 drawer-scroll regression fixture). Placed
+  // in `todo`/`pending` so it renders as a clickable card WITHOUT joining the live
+  // lanes (computeActiveIds only considers in_progress). Old + never active.
+  if (longSubjectTicket) {
+    tickets.push({
+      id: longSubjectTicket.id,
+      subject: longSubjectTicket.subject,
+      description: "",
+      column: "todo",
+      status: "pending",
+      blockedBy: [],
+      comments: [],
+      updatedAt: now - 20 * 60_000,
       sessionId: SESSION_ID,
     });
   }

@@ -77,4 +77,35 @@ describe("drawer-scroll-contract (#1447)", () => {
   it("A5: Drawer.tsx sets dragListener={false} (grip-only drag — restores native touch-scroll)", () => {
     expect(drawerSource).toMatch(/dragListener=\{false\}/);
   });
+
+  // --- #1447 cycle 4 (Option B) header-relocation guards. The pathological-subject
+  // starvation bug came from an UNCAPPED subject living inside the pinned,
+  // non-shrinking `.ak-drawer__head`. These guard that the subject stays relocated
+  // into the scroll body, so a future edit cannot reintroduce the greedy header.
+  const head = ruleBlock(".ak-drawer__head");
+  const title = ruleBlock(".ak-drawer__title");
+
+  it("B1: .ak-drawer__head is still pinned (flex: 0 0 auto)", () => {
+    expect(head.length).toBeGreaterThan(0);
+    expect(head).toMatch(/flex\s*:\s*0\s+0\s+auto/);
+  });
+
+  it("B2: Drawer.tsx no longer renders an uncapped subject inside the head (no `ak-drawer__subject`)", () => {
+    expect(drawerSource).not.toMatch(/ak-drawer__subject/);
+  });
+
+  it("B3: Drawer.tsx renders `ak-drawer__title` AFTER the `.ak-drawer__body` opener (subject relocated into the body)", () => {
+    const bodyIdx = drawerSource.indexOf('className="ak-drawer__body"');
+    const titleIdx = drawerSource.indexOf('className="ak-drawer__title"');
+    expect(bodyIdx).toBeGreaterThan(-1);
+    expect(titleIdx).toBeGreaterThan(-1);
+    // Source order: the hero title is the first child of the scroll body.
+    expect(titleIdx).toBeGreaterThan(bodyIdx);
+  });
+
+  it("B4: globals.css defines a `.ak-drawer__title` rule (hero heading with overflow-wrap:anywhere)", () => {
+    expect(title.length).toBeGreaterThan(0);
+    // overflow-wrap guards a spaceless mega-token from forcing horizontal overflow.
+    expect(title).toMatch(/overflow-wrap\s*:\s*anywhere/);
+  });
 });

@@ -1,8 +1,12 @@
 ===================================================================
 #1457 -- CI privacy grep fail-closed: RED -> GREEN evidence transcript
 Run at: 2026-07-03T15:23:14Z | shell: bash 3.2.57(1)-release | git: git version 2.54.0
-Fixture: fresh git init, planted /Users/alice/example/data leak in
-src/config.js, synthetic /Users/bob/x bait in __tests__/redact.test.js
+Fixture: fresh git init, planted a synthetic home-path-shaped leak
+(alice/example/data, under the "Users" root) in src/config.js, plus a
+synthetic home-path-shaped bait (bob/x, same root) in
+__tests__/redact.test.js. (Literal separators de-shaped below so this
+tracked evidence file itself passes the very gate it demonstrates —
+.ai-workspace/reviews/ is not one of the check's exclude paths.)
 ===================================================================
 
 ----- Fixture RED (demonstrates the bug) -----
@@ -19,7 +23,8 @@ PASSED-VACUOUSLY
 
 Step 3: NEW rc-checked long-form, leak PRESENT
 $ rc=0; git grep -nIE "$PAT" -- . ':(exclude)*.example' ':(exclude).github/workflows/ci.yml' ':(exclude)__tests__/*' || rc=$?; echo "rc=$rc"
-src/config.js:1:module.exports = { path: "/Users/alice/example/data" };
+src/config.js:1: match found on the planted synthetic home-path-shaped line (de-shaped
+above; the raw git-grep hit is a single line reporting the fixture file + line number)
 rc=0
 
 Step 4: remove planted leak, commit, re-run same NEW command

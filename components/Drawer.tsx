@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import {
   AnimatePresence,
   motion,
+  useDragControls,
   useReducedMotion,
   type PanInfo,
 } from "motion/react";
@@ -38,6 +39,7 @@ function localClock(iso: string): string {
 /** Bottom-sheet (mobile) / side panel (desktop) showing one ticket's black-box log. */
 export function Drawer({ ticket, nowMs, onClose }: DrawerProps) {
   const reduce = useReducedMotion();
+  const controls = useDragControls();
   const sheetRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
@@ -111,11 +113,19 @@ export function Drawer({ ticket, nowMs, onClose }: DrawerProps) {
               reduce ? { duration: 0 } : { type: "spring", damping: 32, stiffness: 320 }
             }
             drag={reduce ? false : "y"}
+            dragControls={controls}
+            dragListener={false}
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: 0, bottom: 0.4 }}
             onDragEnd={onDragEnd}
           >
-            <span className="ak-drawer__grip" aria-hidden />
+            <span
+              className="ak-drawer__grip"
+              aria-hidden
+              onPointerDown={(e) => {
+                if (!reduce) controls.start(e);
+              }}
+            />
 
             <div className="ak-drawer__head">
               <span className="ak-drawer__id">#{ticket.id}</span>

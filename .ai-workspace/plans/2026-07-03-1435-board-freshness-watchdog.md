@@ -211,3 +211,9 @@ Non-blocking carry-forward (executor/exec-review, not gating): OBS-D — R1's he
 cairn: plan-review round-2 PASS — external out-of-band age-watchdog, fail-closed, courier-independent activity signal, all three never-ran modes closed, coverage stated precisely; ship to executor.
 
 **Round-1 verdict was NEEDS-WORK (DEF-1/DEF-2 BLOCKING, DEF-3 NAME-IT) — all resolved above.**
+
+---
+
+**execution-review verdict (role 4/4, 2026-07-03): PASS** — see `.ai-workspace/reviews/1435-exec-review.md`.
+
+Reproduced from source, adversarial: both-ends non-vacuity PROVEN (no-op'ing the injected notify in `runFreshnessCheck` turned EXACTLY the 3 alerting-verdict tests red — STALE-ACTIVE + 2 fail-closed UNKNOWN — while FRESH/IDLE/kill-switch/purity stayed green; restored → 14 pass). Typecheck exit 0, `npm test` 265 pass exit 0. Privacy gate clean (exact CI grep, git-grep exit 1 / 0 matches). D1 (board.json mtime + sync.log MAX-fold, never rescues a null board), D2 (courier-independent ledger+heartbeat mtimes, ENOENT=idle / read-error=fail-closed), D3 (defaultNotify reused via lib/notify.ts, courier re-exports it), kill-switch (own env+dotfile), and Rule-16 env config all verified. Installer `--dry-run` mutates nothing (0/0 launchd before/after); `--uninstall` uses mv-not-rm (Rule 14). R1 handled per OBS-D: watchdog works standalone (live `--check` → UNKNOWN exit 0, no healthmon dep); the residual is concretely specified — healthmon's SPEC is a static heredoc in `ai-brain/tools/launchd-health-check.sh`, exact row `com.user.kanban-board-watchdog|event|-|-|periodic board-freshness watchdog (#1435)` surfaced in installer note + README. Ledger shows a single well-composed executor line (spawn agentId overlay-merged with self-append). No gating defects. READY TO SHIP.

@@ -86,3 +86,64 @@ file, readable from detached/background shells — which the courier self-refres
 expiry. This adds **no** secret to any committed file. With no reachable credential, the
 hook re-exports locally and logs `skipped-no-token`, still exiting 0; three consecutive
 non-success records fire an out-of-band notification.
+
+### Board-freshness watchdog — external, out-of-band, fail-closed (#1435)
+
+The sync-failure alert above only fires when the courier **ran and failed** (3 trailing
+non-success `sync.log` records). It is structurally blind to the courier **never running
+at all** — the hook unwired from `~/.claude/settings.json`, a kill-switch present, or a
+long silent executor leg that writes no `TaskCreate`/`TaskUpdate` — because all three
+write **zero** `sync.log` records, so the counter never advances and the board freezes
+silently while real work is happening.
+
+`scripts/board-freshness-watchdog.ts` is an **independent, opt-in** launchd job that
+closes that gap. It runs on its own `StartInterval` schedule (a few minutes), separate
+from the courier, and asks two questions from the **outside**:
+
+1. **Is `data/board.json` old?** — `now − mtime` vs a threshold `N`.
+2. **Is anyone working right now?** — the newest mtime across the courier-independent
+   `~/.claude/3role-ledger/<session>/*.jsonl` and `~/.claude/lane-heartbeats/<session>.beat`
+   markers, vs an active-window `W`.
+
+Board **old** AND work **active** → it fires the **same** macOS notification the courier
+uses. Board **fresh** → quiet. Nobody working → quiet (no cry-wolf). Can't tell (board
+missing, signal unreadable) → it **alerts anyway** (fail-closed). It imports no Blob SDK,
+no credential, and makes no network call.
+
+Preview the exact launchd job, then install it (macOS):
+
+```sh
+scripts/install-board-watchdog.sh --dry-run   # print + plutil-lint the plist, change nothing
+scripts/install-board-watchdog.sh             # write ~/Library/LaunchAgents + load it
+scripts/install-board-watchdog.sh --uninstall # unload + move the plist aside
+```
+
+Check the current verdict by hand at any time (prints one token, fires nothing):
+
+```sh
+npm run kanban:watchdog -- --check            # FRESH | STALE-ACTIVE | IDLE | UNKNOWN | DISABLED
+```
+
+**Kill-switch** (its own, independent of the courier's): set `BOARD_WATCHDOG_OFF=1`, or
+create the dotfile `~/.claude/.kanban-watchdog-off` (override with `BOARD_WATCHDOG_OFF_FILE`).
+
+**Config** (all env, sane defaults — nothing hardcoded): `BOARD_STALE_THRESHOLD_MS`
+(default 10 min), `BOARD_WATCHDOG_ACTIVE_WINDOW_MS` (default 8 min), `OUT` (board path),
+`LEDGER_DIR` / `HEARTBEAT_DIR` (reused from the exporter), `SYNC_LOG`,
+`BOARD_WATCHDOG_FOLD_SYNCLOG` (default on — folds the newest `sync.log` ts into freshness
+so an actively-running-but-failing courier stays the #1405 counter's job, not this one),
+`BOARD_WATCHDOG_INTERVAL_S` (installer, default 120), `BOARD_WATCHDOG_LABEL`.
+
+**Who watches the watchdog (R1).** A launchd job can itself be unloaded or never
+installed, silently re-opening the exact blind spot this closes. The daily
+`com.user.launchd-healthmon` job is the natural backstop — it reports any launchd Label
+that is expected-but-not-loaded. That job's watched-set is an **explicit static list** in
+`ai-brain`'s `tools/launchd-health-check.sh` (a different repo), so to make the backstop
+real, register this watchdog's Label there:
+
+```
+com.user.kanban-board-watchdog|event|-|-|periodic board-freshness watchdog (#1435)
+```
+
+This watchdog takes **no hard dependency** on healthmon — it ships and works standalone;
+the registration is best-effort hardening the operator applies in `ai-brain`.

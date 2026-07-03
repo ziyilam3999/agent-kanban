@@ -643,6 +643,38 @@ button {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--panel);
+  /* #1456: the sticky header (`.ak-header`, z-index:30) would otherwise tuck
+     this panel's top edge under itself when auto-revealed via scrollIntoView.
+     scroll-margin-top is the robust fix — it just needs to be >= the header's
+     rendered height, so it tolerates the header's height changing (it wraps to
+     2 rows <=640px, see the media query below) rather than needing an exact
+     sticky `top` offset. Generous desktop estimate (brand row + status +
+     PipelineMeter + padding); the mobile override below covers the wrap. */
+  scroll-margin-top: 104px;
+}
+
+/* #1456: one-shot arrival cue — plays once when BoardView auto-reveals this
+   panel on a genuine `<2 -> >=2` transition (never on 2->3, never on load).
+   Transform/opacity/box-shadow only — zero layout shift (the telemetry-console
+   rule stated above). Reuses the `ak-glow` mint-ring family (globals.css
+   ak-glow keyframe). */
+.ak-lanes--arrive {
+  animation: ak-lanes-arrive 1.9s ease-in-out 1;
+}
+
+@keyframes ak-lanes-arrive {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--live) 80%, transparent);
+    border-color: var(--live);
+  }
+  26% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--live) 45%, transparent);
+    border-color: var(--live);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    border-color: var(--line);
+  }
 }
 
 .ak-lane-row {
@@ -762,6 +794,9 @@ button {
   .ak-lanes {
     margin: 12px 10px 0;
     padding: 10px;
+    /* #1456: the header wraps to 2 rows here (brand row + status row), so it's
+       taller than the desktop estimate above — bump the clearance to match. */
+    scroll-margin-top: 148px;
   }
   .ak-lane-row {
     flex-direction: column;
@@ -785,6 +820,13 @@ button {
   .ak-lane-stage__pulse {
     animation: none !important;
     opacity: 1 !important;
+  }
+
+  /* #1456: no pulsing ring — a static bright-mint border stands in for the
+     arrival cue (the scroll itself is already instant via behavior:"auto"). */
+  .ak-lanes--arrive {
+    animation: none !important;
+    border-color: var(--live) !important;
   }
 }
 

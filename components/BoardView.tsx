@@ -7,6 +7,7 @@ import type { Board, Column, Ticket } from "@/lib/board-schema";
 import { COLUMNS, COLUMN_LABELS } from "@/lib/board-schema";
 import { computeActiveIds } from "@/lib/active";
 import { deriveLanes } from "@/lib/lanes";
+import { decideLaneReveal } from "@/lib/lane-reveal";
 import { COLUMN_HUE } from "@/lib/ui-meta";
 import { Card } from "./Card";
 import { LiveSwimlanes } from "./LiveSwimlanes";
@@ -20,6 +21,28 @@ import { Drawer } from "./Drawer";
 const POLL_MS = 5000;
 // Hold the moved/fresh flag for the full arrival-glow animation (ak-glow 1.9s).
 const GLOW_MS = 2000;
+// #1456: hold the Live Swimlanes one-shot arrival cue for the full
+// `ak-lanes-arrive` keyframe run (globals.css, 1.9s — the ak-glow family duration).
+const ARRIVE_MS = 1900;
+
+/**
+ * #1456 — true when `el`'s bounding box is ALREADY fully within the viewport
+ * (the auto-reveal "don't-yank" guard). A zero-size rect (not yet laid out —
+ * also jsdom's default with no real layout engine) is treated as NOT visible:
+ * there is nothing on-screen yet to consider "already revealed". NOTE: this
+ * runtime computation has NO automated jsdom proof (plan risk r5 — jsdom
+ * returns an all-zero rect for every element); its correctness rests on the
+ * ui-evolve real-browser screenshots, not a unit test.
+ */
+function isAlreadyInViewport(el: Element): boolean {
+  const rect = el.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return false;
+  const vh = window.innerHeight || document.documentElement.clientHeight;
+  const vw = window.innerWidth || document.documentElement.clientWidth;
+  return (
+    rect.top >= 0 && rect.left >= 0 && rect.bottom <= vh && rect.right <= vw
+  );
+}
 
 /**
  * Tickets visible for the selected session. Tickets carry an 8-char `sessionId`
@@ -46,6 +69,8 @@ export function BoardView({ initial }: { initial: Board }) {
   const [moved, setMoved] = useState<Set<string>>(new Set());
   const [fresh, setFresh] = useState<Set<string>>(new Set());
   const [activeCol, setActiveCol] = useState(0);
+  // #1456: true for the one-shot Live Swimlanes arrival cue (`ak-lanes--arrive`).
+  const [arrive, setArrive] = useState(false);
 
   // Map of ticket-id -> last-seen column, for per-poll diffing. Scoped to the
   // selected session (see the session-change reset effect below).
@@ -54,6 +79,11 @@ export function BoardView({ initial }: { initial: Board }) {
   const currentSessionIdRef = useRef<string | undefined>(undefined);
   const stripRef = useRef<HTMLDivElement>(null);
   const glowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // #1456: the revealed Live Swimlanes panel (`.ak-lanes`) — scrollIntoView target
+  // + viewport-visibility probe. Forwarded through LiveSwimlanes to the section
+  // itself (not a wrapper) so `scroll-margin-top` applies to the right element.
+  const panelRef = useRef<HTMLElement>(null);
+  const arriveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ---- Poll the API, diff each snapshot, flag movers + new tickets ----
   useEffect(() => {
@@ -195,6 +225,45 @@ export function BoardView({ initial }: { initial: Board }) {
   const lanes = useMemo(() => deriveLanes(visible, activeIds), [visible, activeIds]);
   const laneCount = activeIds.size;
 
+  // ---- #1456: auto-reveal the Live Swimlanes panel when it first appears ----
+  // Seeded from lanes.length AT FIRST RENDER (not useRef(0)) so a page that
+  // loads already at >=2 lanes does NOT auto-scroll on mount — only a genuine
+  // mid-session `<2 -> >=2` crossing counts as an "appearance". Keys on
+  // `lanes.length`, the EXACT mount predicate below (`lanes.length >= 2 &&
+  // <LiveSwimlanes/>`) — NOT `laneCount` (= activeIds.size) above, a different
+  // population that can diverge (deriveLanes further filters to in_progress ∪
+  // shipping-after-pass). See lib/lane-reveal.ts for the guard-decision logic.
+  const prevLaneCountRef = useRef<number>(lanes.length);
+
+  useEffect(() => {
+    const prevCount = prevLaneCountRef.current;
+    const currentCount = lanes.length;
+    prevLaneCountRef.current = currentCount;
+
+    const el = panelRef.current;
+    const alreadyVisible = !!el && isAlreadyInViewport(el);
+    const decision = decideLaneReveal({
+      prevCount,
+      currentCount,
+      alreadyVisible,
+      drawerOpen: selectedId != null,
+      reducedMotion: !!reduce,
+    });
+
+    if (decision.reveal && el) {
+      // No .focus() — scrollIntoView only, so no focus theft (a11y is already
+      // served by the header's aria-live "N LANES LIVE" pill).
+      el.scrollIntoView({ block: "start", behavior: decision.behavior });
+      setArrive(true);
+      if (arriveTimer.current) clearTimeout(arriveTimer.current);
+      arriveTimer.current = setTimeout(() => setArrive(false), ARRIVE_MS);
+    }
+
+    return () => {
+      if (arriveTimer.current) clearTimeout(arriveTimer.current);
+    };
+  }, [lanes.length, selectedId, reduce]);
+
   const onStripScroll = useCallback(() => {
     const el = stripRef.current;
     if (!el) return;
@@ -247,7 +316,12 @@ export function BoardView({ initial }: { initial: Board }) {
 
       <main>
         {lanes.length >= 2 && (
-          <LiveSwimlanes lanes={lanes} reduce={!!reduce} />
+          <LiveSwimlanes
+            ref={panelRef}
+            lanes={lanes}
+            reduce={!!reduce}
+            arrive={arrive}
+          />
         )}
 
         <div

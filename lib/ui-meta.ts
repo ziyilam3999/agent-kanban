@@ -107,8 +107,11 @@ export function verdictHue(v: string): string {
   return "var(--fg-dim)";
 }
 
-/** Pipeline roles that DO the work (not review) — used to name the in_progress actor. */
-const WORK_PIPELINE_ROLES = new Set<string>(["planner", "executor"]);
+/** Pipeline roles that DO the work (not review) — used to name the in_progress
+ * actor. Exported (#1468) so the stage-bar selector can name the correct work
+ * role to bounce the pointer onto — reusing the exact set phaseLine/cardModel
+ * already use, so the bar never disagrees with them about "who is a work role." */
+export const WORK_PIPELINE_ROLES = new Set<string>(["planner", "executor"]);
 
 /**
  * The latest review verdict for a ticket, preferring an execution-review over a
@@ -124,6 +127,23 @@ export function latestReviewVerdict(ticket: Ticket): string | undefined {
     else if (c.role === "plan-review") planVerdict = c.verdict;
   }
   return execVerdict ?? planVerdict;
+}
+
+/**
+ * The latest verdict for ONE named review role (#1468) — generalizes
+ * latestReviewVerdict (which blends plan-review/execution-review into a single
+ * "the" verdict) to a per-role lookup, so the stage-bar selector can classify
+ * plan-review and execution-review INDEPENDENTLY. Same last-match-wins scan
+ * (comments are oldest-first); latestReviewVerdict is left untouched (its own
+ * tests depend on the blended behavior) rather than reimplemented on top of
+ * this, to avoid unrelated churn.
+ */
+export function latestVerdictForRole(ticket: Ticket, role: string): string | undefined {
+  let verdict: string | undefined;
+  for (const c of ticket.comments) {
+    if (c.role === role && c.verdict !== undefined) verdict = c.verdict;
+  }
+  return verdict;
 }
 
 /** The model+effort a card badge (or drawer node) shows — the observed tier·version

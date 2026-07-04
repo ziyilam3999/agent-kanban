@@ -51,12 +51,21 @@ export const LiveSwimlanes = forwardRef<HTMLElement, LiveSwimlanesProps>(
               aria-label={`stage ${lane.currentStageIndex + 1} of ${PIPELINE_ROLES.length}`}
             >
               {PIPELINE_ROLES.map((role, idx) => {
+                // #1468: a failed review's OWN stage renders red-tinted
+                // regardless of index order (currentStageIndex may have
+                // returned BACKWARD to a prior work role during a bounce, so
+                // the plain idx-vs-currentStageIndex comparison alone would
+                // read the failed review as "pending" — this check takes
+                // precedence and is a no-op on every non-bounced lane, since
+                // `failedStage` is undefined there).
                 const state =
-                  idx < lane.currentStageIndex
-                    ? "done"
-                    : idx === lane.currentStageIndex
-                      ? "live"
-                      : "pending";
+                  lane.failedStage === idx
+                    ? "failed"
+                    : idx < lane.currentStageIndex
+                      ? "done"
+                      : idx === lane.currentStageIndex
+                        ? "live"
+                        : "pending";
                 const isLive = state === "live";
                 const hue = roleColor(role);
 

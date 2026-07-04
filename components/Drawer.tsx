@@ -10,14 +10,8 @@ import {
 } from "motion/react";
 import type { Ticket } from "@/lib/board-schema";
 import { COLUMN_LABELS } from "@/lib/board-schema";
-import {
-  abbreviateModel,
-  COLUMN_HUE,
-  PIPELINE_ROLES,
-  roleColor,
-  roleLabel,
-  verdictHue,
-} from "@/lib/ui-meta";
+import { abbreviateModel, COLUMN_HUE, roleColor, roleLabel, verdictHue } from "@/lib/ui-meta";
+import { resolveStageBar } from "@/lib/stage-bar";
 import { relativeTime, elapsedGap } from "@/lib/relative-time";
 
 interface DrawerProps {
@@ -395,38 +389,69 @@ export function Drawer({ ticket, nowMs, onClose }: DrawerProps) {
 }
 
 /**
- * 4-step pipeline-progress header (planner → plan-review → executor → exec-review).
- * A step is DONE when its role appears in the ledger; the first not-yet-acted role
- * is the CURRENT/next pending stage.
+ * 4-pill stage bar (planner → plan-review → executor → exec-review) — a
+ * VERDICT-AWARE control-flow gauge, not a role-presence progress bar (#1468).
+ * Renders directly off the shared resolveStageBar() selector so this bar and
+ * the swimlane track (lib/lanes.ts -> LiveSwimlanes.tsx) can never disagree
+ * about which role the chain is actually working on right now. A fail-class
+ * review pulls the glow BACK to the prior work role (`↩`), paints itself red
+ * + `✕`, drops a `◄` loopback glyph in the gap, and forces every downstream
+ * pill grey — even when a stray later comment already landed (the exact
+ * operator-caught bug). A clean pass tints green + `✓`; a caveated pass tints
+ * amber; terminal all-PASS kills the glow and shows a `✓ DONE` cap.
  */
-function PipelineProgress({ ticket }: { ticket: Ticket }) {
-  const rolesSeen = new Set(ticket.comments.map((c) => c.role));
-  const nextPending = PIPELINE_ROLES.find((r) => !rolesSeen.has(r)) ?? null;
-  const doneCount = PIPELINE_ROLES.filter((r) => rolesSeen.has(r)).length;
+export function PipelineProgress({ ticket }: { ticket: Ticket }) {
+  const stageBar = resolveStageBar(ticket);
 
   return (
-    <div
-      className="ak-pipeline"
-      role="img"
-      aria-label={`pipeline progress: ${doneCount} of ${PIPELINE_ROLES.length} roles complete${
-        nextPending ? `, next: ${roleLabel(nextPending)}` : ""
-      }`}
-    >
-      {PIPELINE_ROLES.map((role) => {
-        const done = rolesSeen.has(role);
-        const current = !done && role === nextPending;
-        const state = done ? "done" : current ? "current" : "pending";
-        return (
-          <div
-            key={role}
-            className={`ak-pipeline__step ak-pipeline__step--${state}`}
-            style={{ ["--step" as string]: roleColor(role) }}
-          >
-            <span className="ak-pipeline__bar" aria-hidden />
-            <span className="ak-pipeline__label">{roleLabel(role)}</span>
-          </div>
-        );
-      })}
+    <div className={`ak-pipeline-wrap${stageBar.terminal ? " ak-pipeline--done" : ""}`}>
+      <div className="ak-pipeline" role="img" aria-label={stageBar.ariaLabel}>
+        {stageBar.pills.map((pill) => {
+          const { role, look, verdict } = pill;
+          const isGlow = look === "current" || look === "reworking";
+          const hue =
+            (look === "pass" || look === "failed") && verdict !== undefined
+              ? verdictHue(verdict)
+              : roleColor(role);
+          const isLoopbackStart = stageBar.loopbackGap?.[0] === role;
+
+          return (
+            <div
+              key={role}
+              className={`ak-pipeline__step ak-pipeline__step--${look}${
+                isGlow ? " ak-pipeline__step--glow" : ""
+              }`}
+              style={{ ["--step" as string]: hue }}
+            >
+              <span className="ak-pipeline__bar" aria-hidden />
+              <span className="ak-pipeline__label">
+                {look === "reworking" && (
+                  <span className="ak-pipeline__prefix" aria-hidden>
+                    ↩
+                  </span>
+                )}
+                <span className="ak-pipeline__label-text">{roleLabel(role)}</span>
+                {look === "pass" && (
+                  <span className="ak-pipeline__glyph" aria-hidden>
+                    ✓
+                  </span>
+                )}
+                {look === "failed" && (
+                  <span className="ak-pipeline__glyph" aria-hidden>
+                    ✕
+                  </span>
+                )}
+              </span>
+              {isLoopbackStart && (
+                <span className="ak-pipeline__loopback" aria-hidden>
+                  ◄
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {stageBar.terminal && <span className="ak-pipeline__done-cap">✓ DONE</span>}
     </div>
   );
 }

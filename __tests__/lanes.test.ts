@@ -19,7 +19,11 @@ const ticket = (
   updatedAt,
 });
 
-const c = (role: string): LedgerComment => ({ role, ts: "2026-06-27T00:00:00.000Z" });
+const c = (role: string, verdict?: string): LedgerComment => ({
+  role,
+  ts: "2026-06-27T00:00:00.000Z",
+  verdict,
+});
 
 describe("deriveLanes — pure selector", () => {
   it("AC#1a: 0 active ids → fewer than 2 lanes (BoardView gate stays false)", () => {
@@ -112,5 +116,44 @@ describe("deriveLanes — pure selector", () => {
     const activeIds = computeActiveIds(tickets, true, now);
     const lanes = deriveLanes(tickets, activeIds);
     expect(lanes.length).toBe(2);
+  });
+
+  describe("#1468 AC5: swimlane parity — verdict-aware currentStageIndex, agrees with the drawer bar", () => {
+    it("plan-review FAIL: the lit stage RETURNS to planner (index 0), plan-review marked as the failed stage (index 1)", () => {
+      const t = ticket("1", "in_progress", [
+        c("planner"),
+        c("plan-review", "BLOCK"),
+        c("executor"), // stray comment — must not move the lane forward either
+      ]);
+      const [lane] = deriveLanes([t], new Set(["1"]));
+      expect(lane.currentStageIndex).toBe(0);
+      expect(lane.reworking).toBe(true);
+      expect(lane.failedStage).toBe(1);
+    });
+
+    it("exec-review FAIL: the lit stage returns to executor (index 2), exec-review marked as the failed stage (index 3)", () => {
+      const t = ticket("1", "in_progress", [
+        c("planner"),
+        c("plan-review", "APPROVE"),
+        c("executor"),
+        c("execution-review", "FAIL"),
+      ]);
+      const [lane] = deriveLanes([t], new Set(["1"]));
+      expect(lane.currentStageIndex).toBe(2);
+      expect(lane.reworking).toBe(true);
+      expect(lane.failedStage).toBe(3);
+    });
+
+    it("non-regression: a no-fail fixture's currentStageIndex is UNCHANGED from today (AC#3 above stays green) and carries no reworking/failedStage", () => {
+      const executing = ticket("3", "in_progress", [
+        c("planner"),
+        c("plan-review"),
+        c("executor"),
+      ]);
+      const [lane] = deriveLanes([executing], new Set(["3"]));
+      expect(lane.currentStageIndex).toBe(2);
+      expect(lane.reworking).toBeUndefined();
+      expect(lane.failedStage).toBeUndefined();
+    });
   });
 });

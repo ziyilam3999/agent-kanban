@@ -6,6 +6,7 @@
 
 import type { Ticket } from "./board-schema";
 import { PIPELINE_ROLES, shippingAfterPass } from "./ui-meta";
+import { resolveStageBar } from "./stage-bar";
 
 /** One live ticket's lane descriptor for the swimlanes view. */
 export interface Lane {
@@ -14,13 +15,24 @@ export interface Lane {
   /** Ticket subject (already redacted upstream). */
   subject: string;
   /**
-   * Index into PIPELINE_ROLES of the lane's CURRENT stage = the highest-index
-   * pipeline role present in this ticket's comments. 0 (planner) when no pipeline
-   * role has been seen yet (planner-pending).
+   * Index into PIPELINE_ROLES of the lane's CURRENT stage. Non-bounced
+   * (unchanged pre-#1468 semantics): the highest-index pipeline role present
+   * in this ticket's comments — 0 (planner) when no pipeline role has been
+   * seen yet. Bounced (#1468): the index of the WORK role (planner/executor)
+   * the chain returned to after a fail-class review, derived from the SAME
+   * resolveStageBar() selector the drawer bar consumes — so the lane track and
+   * the drawer pill can never disagree about which role is genuinely active.
    */
   currentStageIndex: number;
   /** The set of distinct roles seen on this ticket (drives done/pending tinting). */
   rolesSeen: Set<string>;
+  /** True iff a fail-class review bounced the pointer back onto a prior work
+   * role (#1468) — undefined on every non-bounced lane, so existing fixtures
+   * that never set this field stay exactly as they render today. */
+  reworking?: boolean;
+  /** Index of the FAILED review role's stage (--err tint), set only when
+   * `reworking` is true (#1468). */
+  failedStage?: number;
 }
 
 /**
@@ -55,11 +67,27 @@ export function deriveLanes(
     if (!activeIds.has(t.id)) continue;
 
     const rolesSeen = new Set(t.comments.map((c) => c.role));
+    const stageBar = resolveStageBar(t);
 
-    // Current stage = highest PIPELINE_ROLES index present in rolesSeen, else 0.
-    let currentStageIndex = 0;
-    for (let i = 0; i < PIPELINE_ROLES.length; i++) {
-      if (rolesSeen.has(PIPELINE_ROLES[i])) currentStageIndex = i;
+    let currentStageIndex: number;
+    let reworking: boolean | undefined;
+    let failedStage: number | undefined;
+
+    if (stageBar.reworking && stageBar.pointer) {
+      // Bounce active (#1468): the lit stage RETURNS to the work role the
+      // chain bounced back to — must agree with the drawer bar's pointer.
+      currentStageIndex = PIPELINE_ROLES.indexOf(stageBar.pointer);
+      reworking = true;
+      if (stageBar.loopbackGap) {
+        failedStage = PIPELINE_ROLES.indexOf(stageBar.loopbackGap[1]);
+      }
+    } else {
+      // No bounce: preserve the EXACT pre-#1468 semantics (highest reached
+      // index) — non-regression for every non-fail fixture (AC5).
+      currentStageIndex = 0;
+      for (let i = 0; i < PIPELINE_ROLES.length; i++) {
+        if (rolesSeen.has(PIPELINE_ROLES[i])) currentStageIndex = i;
+      }
     }
 
     lanes.push({
@@ -67,6 +95,8 @@ export function deriveLanes(
       subject: t.subject,
       currentStageIndex,
       rolesSeen,
+      reworking,
+      failedStage,
       updatedAt: t.updatedAt,
     });
   }

@@ -763,6 +763,16 @@ button {
   display: inline-flex;
 }
 
+/* A failed review's own stage (#1468) — red, regardless of index order (the
+   lit stage may have moved BACKWARD past this one during a bounce). Reuses
+   the board's single fail color, same idiom as .ak-verdict / the drawer's
+   failed pill. */
+.ak-lane-stage--failed {
+  border-color: color-mix(in srgb, var(--err) 55%, transparent);
+  color: var(--err);
+  background: color-mix(in srgb, var(--err) 12%, var(--panel));
+}
+
 /* Future stages: dim, awaiting. */
 .ak-lane-stage--pending {
   color: var(--fg-faint);
@@ -1131,15 +1141,22 @@ button {
   margin: 0 0 12px;
 }
 
-/* Pipeline-progress header — 4 steps (planner → plan-review → executor → exec-review) */
+/* Pipeline stage bar — 4 pills (planner → plan-review → executor → exec-review).
+   #1468: a VERDICT-AWARE control-flow gauge (resolveStageBar()), not a role-
+   presence progress bar — see components/Drawer.tsx PipelineProgress. */
+.ak-pipeline-wrap {
+  position: relative;
+  margin: 0 0 18px;
+}
+
 .ak-pipeline {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
-  margin: 0 0 18px;
 }
 
 .ak-pipeline__step {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1151,16 +1168,33 @@ button {
   background: var(--line);
 }
 
-.ak-pipeline__step--done .ak-pipeline__bar {
+/* done (work role reached) / pass (review role, non-fail verdict) / failed
+   (review role, fail-class verdict) all fill via the SAME --step var — its
+   JS-computed value differs (role hue for done, verdictHue(verdict) for
+   pass/failed) but the CSS mechanism is one shared idiom, not three. */
+.ak-pipeline__step--done .ak-pipeline__bar,
+.ak-pipeline__step--pass .ak-pipeline__bar,
+.ak-pipeline__step--failed .ak-pipeline__bar {
   background: var(--step);
 }
 
-.ak-pipeline__step--current .ak-pipeline__bar {
+/* The single active/glow pill — shared by BOTH a genuinely-next role
+   (`current`) and a fail-bounced re-working role (`reworking`): identical
+   visual treatment (brief §4 row 2 vs row 3), the only difference is the `↩`
+   text prefix rendered by the component. */
+.ak-pipeline__step--glow .ak-pipeline__bar {
   background: color-mix(in srgb, var(--step) 45%, var(--line));
   box-shadow: 0 0 6px 0 color-mix(in srgb, var(--step) 55%, transparent);
 }
 
 .ak-pipeline__label {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ak-pipeline__label-text {
   font-family: var(--font-mono);
   font-size: 8.5px;
   letter-spacing: 0.06em;
@@ -1168,14 +1202,69 @@ button {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+  /* grow:0 (NOT 1) — the text hugs its own content width so the ✓/✕ glyph
+     sits immediately next to the label instead of being pushed to the far
+     edge of the pill's column (caught on the #1468 ui-evolve eyeball pass:
+     a greedy grow made the glyph read as belonging to the NEXT pill). Still
+     shrinks (and ellipsizes) under real space pressure via min-width:0. */
+  flex: 0 1 auto;
 }
 
-.ak-pipeline__step--done .ak-pipeline__label {
+.ak-pipeline__step--done .ak-pipeline__label-text,
+.ak-pipeline__step--pass .ak-pipeline__label-text,
+.ak-pipeline__step--failed .ak-pipeline__label-text {
   color: var(--step);
 }
 
-.ak-pipeline__step--current .ak-pipeline__label {
+.ak-pipeline__step--glow .ak-pipeline__label-text {
   color: var(--fg);
+}
+
+/* The ✓/✕ verdict glyph + ↩ rework prefix ride as separate NON-shrinking spans
+   (brief §5) — only the role label text ellipsizes, so a long label can never
+   clip the glyph that carries the pass/fail meaning. */
+.ak-pipeline__glyph,
+.ak-pipeline__prefix {
+  flex-shrink: 0;
+  font-size: 8.5px;
+}
+
+.ak-pipeline__step--pass .ak-pipeline__glyph {
+  color: var(--step);
+}
+
+.ak-pipeline__step--failed .ak-pipeline__glyph {
+  color: var(--err);
+}
+
+/* The ◄ loopback connector — one glyph in the EXISTING 6px inter-pill gap
+   (brief §5/§6): zero added layout width, cannot push the row past the
+   viewport. Rendered on the WORK-role pill (the earlier of the adjacent
+   loopback pair), positioned at its right edge. */
+.ak-pipeline__loopback {
+  position: absolute;
+  top: 1px;
+  right: -8px;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--err);
+  pointer-events: none;
+}
+
+/* Terminal all-PASS cap (#1468 brief §4 state 4) — "nothing is active", so a
+   short right-aligned tag replaces the (now absent) glow as the "finished"
+   signal. May sit above the labels at the narrowest width but never wraps the
+   pills (brief §6). */
+.ak-pipeline__done-cap {
+  position: absolute;
+  top: -14px;
+  right: 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--done);
 }
 
 /* Verdict pill — review decision on a timeline node */

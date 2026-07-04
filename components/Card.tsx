@@ -2,6 +2,8 @@
 
 import type { Ticket } from "@/lib/board-schema";
 import {
+  abbreviateModel,
+  cardModel,
   COLUMN_HUE,
   PIPELINE_ROLES,
   phaseLine,
@@ -34,6 +36,7 @@ export function Card({ ticket, nowMs, glow, active, sessionLastActive, reduce }:
   const phase = phaseLine(ticket, active, nowMs, undefined, sessionLastActive);
   const rolesSeen = new Set(ticket.comments.map((c) => c.role));
   const blocked = ticket.blockedBy.length > 0;
+  const model = cardModel(ticket);
   // Lift a leading "[#1063]" / "[EPIC]" prefix out of the subject so it doesn't read as a
   // second ticket id next to the card's own #id — render it as a distinct chip instead.
   const subjectTag = parseSubjectTag(ticket.subject);
@@ -95,6 +98,14 @@ export function Card({ ticket, nowMs, glow, active, sessionLastActive, reduce }:
         {blocked && (
           <span className="ak-blocked">
             ⛔ blocked by #{ticket.blockedBy.join(", #")}
+          </span>
+        )}
+        {model && (
+          <span className="ak-model">
+            {abbreviateModel(model.version)}
+            {model.effort && (
+              <span className="ak-model__effort">·{model.effort}</span>
+            )}
           </span>
         )}
         <span className="ak-card__time">

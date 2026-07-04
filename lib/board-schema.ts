@@ -39,6 +39,19 @@ export interface LedgerComment {
   skipReason?: string;
   /** Review decision for review roles (e.g. APPROVE / BLOCK / SHIP-WITH-FIXES). Trimmed + length-capped. */
   verdict?: string;
+  /**
+   * OPTIONAL model+effort provenance (#1465) — the role's OBSERVED model version
+   * (e.g. "claude-sonnet-5"), tier (e.g. "sonnet"), and session-inherited effort
+   * (e.g. "xhigh"), captured at ledger-append time by ai-brain's 3role-ledger.mjs.
+   * All three are back-compat optional: pre-feature ledger lines carry none of
+   * them, and that is the COMMON case for history, not an edge case — the card
+   * renders NOTHING when modelVersion is absent (never an empty pill / dangling
+   * separator). effort is meaningless without modelVersion (see lib/ui-meta.ts
+   * cardModel) so it is never shown alone.
+   */
+  modelVersion?: string;
+  modelTier?: string;
+  effort?: string;
 }
 
 /** One ticket = one ~/.claude/tasks/<session>/<id>.json joined with its ledger. */

@@ -51,6 +51,10 @@ export interface RawLedgerLine {
   oracle?: string;
   /** Review decision written by a review role (plan-review / execution-review / ship-review). */
   verdict?: string;
+  /** OPTIONAL model+effort provenance (#1465) — see LedgerComment in board-schema.ts. */
+  modelVersion?: string;
+  modelTier?: string;
+  effort?: string;
 }
 
 /** Max characters kept for a verdict pill — long verdicts are truncated. */
@@ -231,6 +235,12 @@ function toComment(line: RawLedgerLine): LedgerComment {
   if (line.agentId) c.agentId = line.agentId;
   if (line.artifact_path) c.artifact = redact(basenameOf(line.artifact_path));
   if (line.skip_reason) c.skipReason = line.skip_reason;
+  // #1465 — copy model+effort STRAIGHT from the ledger line (ai-brain captures at source);
+  // optional + independent (mirrors the agentId/artifact copies above): a line may carry
+  // any subset of the three, and each is copied only when present (back-compat).
+  if (line.modelVersion) c.modelVersion = line.modelVersion;
+  if (line.modelTier) c.modelTier = line.modelTier;
+  if (line.effort) c.effort = line.effort;
 
   // Resolve the verdict from the single source of truth, then apply the
   // display-only redact + length cap. The post-redact truthiness guard is kept:

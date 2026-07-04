@@ -76,3 +76,49 @@ describe("Card phase line render", () => {
     expect(markup).not.toContain("ak-working");
   });
 });
+
+// #1465 AC4 — the model badge renders ONLY when cardModel() resolves, and a
+// model-less footer is BYTE-IDENTICAL to the pre-feature baseline. This literal
+// constant was captured by rendering this SAME in_review+PASS fixture (nowMs=2,
+// updatedAt=1) against the pre-#1465 Card component — it is NOT recomputed from
+// the component under test, so a regression reintroducing an empty pill /
+// dangling separator / structural change WILL be caught.
+const EXPECTED_MODELLESS_FOOT =
+  '<div class="ak-card__foot"><span class="ak-card__time">just now</span></div>';
+
+describe("Card model badge (#1465 AC4)", () => {
+  const foot = (markup: string): string => {
+    const m = markup.match(/<div class="ak-card__foot">.*?<\/div>/s);
+    if (!m) throw new Error("ak-card__foot not found in markup");
+    return m[0];
+  };
+
+  it("model-BEARING ticket → markup contains ak-model and the abbreviated version", () => {
+    const markup = render(
+      ticket("in_review", [
+        { role: "executor", ts: "2026-06-21T01:00:00.000Z" },
+        {
+          role: "execution-review",
+          ts: "2026-06-21T02:00:00.000Z",
+          verdict: "PASS",
+          modelVersion: "claude-sonnet-5",
+          modelTier: "sonnet",
+          effort: "xhigh",
+        },
+      ])
+    );
+    expect(markup).toContain("ak-model");
+    expect(markup).toContain("sonnet-5");
+  });
+
+  it("model-LESS ticket → NO ak-model, and the footer is byte-identical to the pre-feature baseline", () => {
+    const markup = render(
+      ticket("in_review", [
+        { role: "executor", ts: "2026-06-21T01:00:00.000Z" },
+        { role: "execution-review", ts: "2026-06-21T02:00:00.000Z", verdict: "PASS" },
+      ])
+    );
+    expect(markup).not.toContain("ak-model");
+    expect(foot(markup)).toBe(EXPECTED_MODELLESS_FOOT);
+  });
+});

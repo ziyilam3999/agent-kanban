@@ -183,26 +183,34 @@ export function formatCardModel(m: CardModel): string {
  * card; the drawer shows every role's model individually). Comments are
  * oldest-first (build-board convention), so scanning from the end finds the
  * newest match first:
- *   in_progress -> the newest WORK-role (planner/executor) comment carrying a
- *                  modelVersion (the phase line's own actor-selection rule,
- *                  WORK_PIPELINE_ROLES, reused so the badge never disagrees with
- *                  "who is the phase line naming"); no match -> undefined (NOT a
- *                  fallback to another role's model — an in_progress card would
- *                  otherwise show a stale reviewer's model as if it were live).
+ *   in_progress -> the CURRENT actor ONLY — the newest WORK-role
+ *                  (planner/executor) comment (the phase line's own
+ *                  actor-selection rule, WORK_PIPELINE_ROLES, reused so the
+ *                  badge never disagrees with "who is the phase line naming").
+ *                  If that comment carries a modelVersion, return it; if it
+ *                  does NOT, return undefined immediately (honest-unknown) —
+ *                  the scan STOPS at the current actor and never walks past it
+ *                  to an EARLIER work-role comment's model (#1481: doing so
+ *                  showed a completed planner's model on an in-flight
+ *                  executor's card — wrong-actor attribution, not a fallback).
  *   otherwise   -> the newest model-bearing comment, any role (a finished/queued
  *                  card cares about "who last touched it", not liveness).
  * effort rides ONLY on the same comment as its modelVersion (effort-alone is
  * meaningless — design brief §4 Partial state) — enforced structurally here
  * because both fields are read off the SAME matched comment.
- * Returns undefined when no comment in the selected scope carries a modelVersion
- * — the card/drawer then renders NOTHING (no empty pill, no dangling separator).
+ * Returns undefined when the selected comment (in_progress: current actor;
+ * otherwise: newest model-bearing comment) carries no modelVersion — the
+ * card/drawer then renders NOTHING (no empty pill, no dangling separator).
  */
 export function cardModel(ticket: Ticket): CardModel | undefined {
   if (ticket.column === "in_progress") {
     for (let i = ticket.comments.length - 1; i >= 0; i--) {
       const c = ticket.comments[i];
-      if (WORK_PIPELINE_ROLES.has(c.role) && c.modelVersion) {
-        return { version: c.modelVersion, effort: c.effort };
+      if (WORK_PIPELINE_ROLES.has(c.role)) {
+        // Found the current actor — decide HERE, never walk past it to an
+        // earlier work-role comment (that would re-introduce wrong-actor
+        // attribution, #1481).
+        return c.modelVersion ? { version: c.modelVersion, effort: c.effort } : undefined;
       }
     }
     return undefined;

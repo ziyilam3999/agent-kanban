@@ -11,6 +11,7 @@ import {
 import type { Ticket } from "@/lib/board-schema";
 import { COLUMN_LABELS } from "@/lib/board-schema";
 import {
+  abbreviateModel,
   COLUMN_HUE,
   PIPELINE_ROLES,
   roleColor,
@@ -199,6 +200,14 @@ export function Drawer({ ticket, nowMs, onClose }: DrawerProps) {
                           )}
                           {c.agentId && (
                             <span className="ak-node__agent">·{c.agentId}</span>
+                          )}
+                          {c.modelVersion && (
+                            <span className="ak-node__model">
+                              {abbreviateModel(c.modelVersion)}
+                              {c.effort && (
+                                <span className="ak-model__effort">·{c.effort}</span>
+                              )}
+                            </span>
                           )}
                         </div>
                         {c.skipReason ? (

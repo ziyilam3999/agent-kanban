@@ -628,3 +628,86 @@ describe("buildBoard — resolved blockers are dropped (#1316)", () => {
     expect(find(board([X, Y, Z]), "X").blockedBy).toEqual(["Z"]);
   });
 });
+
+describe("buildTicket — model/effort provenance pass-through (#1465 AC3, mixed board)", () => {
+  it("a line carrying modelVersion/modelTier/effort copies all three onto the comment", () => {
+    const t = buildTicket(
+      baseTask(),
+      [
+        {
+          role: "executor",
+          ts: "2026-07-04T04:58:26.116Z",
+          modelVersion: "claude-sonnet-5",
+          modelTier: "sonnet",
+          effort: "xhigh",
+        },
+      ],
+      1
+    );
+    expect(t.comments[0].modelVersion).toBe("claude-sonnet-5");
+    expect(t.comments[0].modelTier).toBe("sonnet");
+    expect(t.comments[0].effort).toBe("xhigh");
+  });
+
+  it("a line carrying NONE of the three fields (old shape) omits all three (back-compat)", () => {
+    const t = buildTicket(
+      baseTask(),
+      [{ role: "planner", ts: "2026-07-04T04:58:26.116Z" }],
+      1
+    );
+    expect(t.comments[0].modelVersion).toBeUndefined();
+    expect(t.comments[0].modelTier).toBeUndefined();
+    expect(t.comments[0].effort).toBeUndefined();
+    expect("modelVersion" in t.comments[0]).toBe(false);
+  });
+
+  it("a MIXED board — some lines model-bearing, some not — each comment reflects its OWN line only", () => {
+    const t = buildTicket(
+      baseTask(),
+      [
+        { role: "planner", ts: "2026-07-04T04:00:00.000Z" },
+        {
+          role: "executor",
+          ts: "2026-07-04T05:00:00.000Z",
+          modelVersion: "claude-sonnet-5",
+          modelTier: "sonnet",
+          effort: "xhigh",
+        },
+        { role: "execution-review", ts: "2026-07-04T06:00:00.000Z", verdict: "PASS" },
+      ],
+      1
+    );
+    expect(t.comments[0].modelVersion).toBeUndefined();
+    expect(t.comments[1].modelVersion).toBe("claude-sonnet-5");
+    expect(t.comments[1].modelTier).toBe("sonnet");
+    expect(t.comments[1].effort).toBe("xhigh");
+    expect(t.comments[2].modelVersion).toBeUndefined();
+  });
+
+  it("model present, effort absent on the ledger line -> comment carries modelVersion/modelTier, no effort", () => {
+    const t = buildTicket(
+      baseTask(),
+      [
+        {
+          role: "executor",
+          ts: "2026-07-04T04:58:26.116Z",
+          modelVersion: "claude-sonnet-5",
+          modelTier: "sonnet",
+        },
+      ],
+      1
+    );
+    expect(t.comments[0].modelVersion).toBe("claude-sonnet-5");
+    expect(t.comments[0].effort).toBeUndefined();
+  });
+
+  it("TypeScript compiles + runs with all three fields absent on every line (optionality, mixed with unrelated fields present)", () => {
+    const lines: RawLedgerLine[] = [
+      { role: "planner", ts: "2026-07-04T04:00:00.000Z", agentId: "p1" },
+      { role: "executor", ts: "2026-07-04T05:00:00.000Z", artifact_path: "PR #1" },
+    ];
+    const t = buildTicket(baseTask(), lines, 1);
+    expect(t.comments).toHaveLength(2);
+    expect(t.comments.every((c) => c.modelVersion === undefined)).toBe(true);
+  });
+});

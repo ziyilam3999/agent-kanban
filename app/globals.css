@@ -910,6 +910,35 @@ button {
   background: color-mix(in srgb, #ff8a7a 9%, transparent);
 }
 
+/* Model provenance micro-pill (#1465) — footer left slot, quiet meta-grey, echoes
+   .ak-tag's shape at footer scale. PINNED tokens (WCAG-verified, do NOT swap for
+   --fg-faint on text — it fails AA, see the --fg-faint comment above): model
+   segment = --fg-meta (~4.5:1+ on --panel), effort segment = --fg-dim (~5.14:1) —
+   both readable, model brighter than effort (two-tone, model is the anchor). */
+.ak-model {
+  display: inline-flex;
+  align-items: baseline;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 5px;
+  color: var(--fg-meta);
+  background: color-mix(in srgb, var(--line) 45%, transparent);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ak-model__effort {
+  color: var(--fg-dim);
+}
+
 .ak-card__time {
   margin-left: auto;
   font-family: var(--font-mono);
@@ -1222,6 +1251,15 @@ button {
 }
 
 .ak-node__agent {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--fg-meta);
+  letter-spacing: 0.02em;
+}
+
+/* Per-role model annotation (#1465) — borderless, matches .ak-node__agent's inline
+   idiom (not a second pill). Shares .ak-model__effort for the dimmer effort segment. */
+.ak-node__model {
   font-family: var(--font-mono);
   font-size: 9px;
   color: var(--fg-meta);

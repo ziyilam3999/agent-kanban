@@ -126,6 +126,76 @@ export function latestReviewVerdict(ticket: Ticket): string | undefined {
   return execVerdict ?? planVerdict;
 }
 
+/** The model+effort a card badge (or drawer node) shows — the observed tier·version
+ * plus an optional subordinate effort suffix (#1465, design brief §2/§4). */
+export interface CardModel {
+  /** Raw captured model version, e.g. "claude-sonnet-5" — abbreviate for display via abbreviateModel(). */
+  version: string;
+  /** Session-inherited effort word, e.g. "xhigh". Only ever attached alongside a version (see cardModel). */
+  effort?: string;
+}
+
+/**
+ * Strip the "claude-" vendor prefix from a captured model version string, e.g.
+ * "claude-sonnet-5" -> "sonnet-5". The leading word IS the tier; the whole token
+ * IS the version — one compact string carries both facts (design brief §2), so
+ * no separate tier chip is rendered.
+ */
+export function abbreviateModel(modelVersion: string): string {
+  return modelVersion.replace(/^claude-/, "");
+}
+
+/**
+ * Compact badge text for a CardModel, e.g. "sonnet-5·xhigh" or, with no effort,
+ * "sonnet-5" (the effort segment AND its separator are dropped TOGETHER — never
+ * a dangling middot, design brief §4 Partial state). Pure text-contract helper;
+ * Card.tsx / Drawer.tsx render the two segments as separate two-tone spans
+ * (model brighter, effort dimmer) but both read off this same abbreviate+join
+ * logic so the textual contract can never drift between the two call sites.
+ */
+export function formatCardModel(m: CardModel): string {
+  const version = abbreviateModel(m.version);
+  return m.effort ? `${version}·${m.effort}` : version;
+}
+
+/**
+ * Select the model+effort a CARD badge shows (design brief §4 — one summary per
+ * card; the drawer shows every role's model individually). Comments are
+ * oldest-first (build-board convention), so scanning from the end finds the
+ * newest match first:
+ *   in_progress -> the newest WORK-role (planner/executor) comment carrying a
+ *                  modelVersion (the phase line's own actor-selection rule,
+ *                  WORK_PIPELINE_ROLES, reused so the badge never disagrees with
+ *                  "who is the phase line naming"); no match -> undefined (NOT a
+ *                  fallback to another role's model — an in_progress card would
+ *                  otherwise show a stale reviewer's model as if it were live).
+ *   otherwise   -> the newest model-bearing comment, any role (a finished/queued
+ *                  card cares about "who last touched it", not liveness).
+ * effort rides ONLY on the same comment as its modelVersion (effort-alone is
+ * meaningless — design brief §4 Partial state) — enforced structurally here
+ * because both fields are read off the SAME matched comment.
+ * Returns undefined when no comment in the selected scope carries a modelVersion
+ * — the card/drawer then renders NOTHING (no empty pill, no dangling separator).
+ */
+export function cardModel(ticket: Ticket): CardModel | undefined {
+  if (ticket.column === "in_progress") {
+    for (let i = ticket.comments.length - 1; i >= 0; i--) {
+      const c = ticket.comments[i];
+      if (WORK_PIPELINE_ROLES.has(c.role) && c.modelVersion) {
+        return { version: c.modelVersion, effort: c.effort };
+      }
+    }
+    return undefined;
+  }
+  for (let i = ticket.comments.length - 1; i >= 0; i--) {
+    const c = ticket.comments[i];
+    if (c.modelVersion) {
+      return { version: c.modelVersion, effort: c.effort };
+    }
+  }
+  return undefined;
+}
+
 /**
  * TRUE iff the ticket passed execution review but its ship tail hasn't
  * completed (#1410): status still `in_progress` AND the NEWEST execution-review

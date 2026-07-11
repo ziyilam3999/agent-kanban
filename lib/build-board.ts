@@ -55,6 +55,9 @@ export interface RawLedgerLine {
   modelVersion?: string;
   modelTier?: string;
   effort?: string;
+  /** EXPLICIT close-stamp (#1516) — see LedgerComment in board-schema.ts. Parse-side closed
+   *  symbol: must be widened here or `line.closedAt` in toComment() below is a tsc error. */
+  closedAt?: string;
 }
 
 /** Max characters kept for a verdict pill — long verdicts are truncated. */
@@ -241,6 +244,10 @@ function toComment(line: RawLedgerLine): LedgerComment {
   if (line.modelVersion) c.modelVersion = line.modelVersion;
   if (line.modelTier) c.modelTier = line.modelTier;
   if (line.effort) c.effort = line.effort;
+  // #1516 — the close-stamp copy. Export-side closed symbol (LedgerComment): omitting this
+  // line is a SILENT drop, not a compile error — the field would parse fine into RawLedgerLine
+  // and simply never reach the emitted board.json (see AC-6c, which asserts on the real export).
+  if (line.closedAt) c.closedAt = line.closedAt;
 
   // Resolve the verdict from the single source of truth, then apply the
   // display-only redact + length cap. The post-redact truthiness guard is kept:

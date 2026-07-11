@@ -52,6 +52,16 @@ export interface LedgerComment {
   modelVersion?: string;
   modelTier?: string;
   effort?: string;
+  /**
+   * EXPLICIT close-stamp (#1516) — an ISO 8601 timestamp written ONLY by ai-brain's
+   * three-role-subagent-ledger.sh (the sole writer that fires exclusively at
+   * SubagentStop/close), never inferred from agentId or any other field. This is
+   * the research seat's punch-out signal: a research comment WITHOUT it is
+   * in-flight, WITH it is done (see lib/active.ts chainInFlight). Back-compat
+   * optional on every role — absent on all pre-#1516 ledger lines and on every
+   * non-research role today.
+   */
+  closedAt?: string;
 }
 
 /** One ticket = one ~/.claude/tasks/<session>/<id>.json joined with its ledger. */

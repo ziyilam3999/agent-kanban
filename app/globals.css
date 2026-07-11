@@ -31,6 +31,12 @@
   /* Signal red — verdict pills only (BLOCK / FAIL / REJECT) */
   --err: #e2564d;
 
+  /* Research/search seat (#1516) — a distinct hue from every pipeline-role color
+     above (no cyan/amber/green/red already in use), signalling "ad-hoc helper,
+     not a required chain stage" at a glance. WCAG-computed ~7.1:1 on --panel
+     (relative-luminance formula, both sRGB->linear) — clears AA (4.5:1). */
+  --research: #b98ef2;
+
   /* Atmosphere */
   --dot: rgba(124, 138, 150, 0.10);
   --radius: 10px;
@@ -848,6 +854,16 @@ button {
   margin-bottom: 6px;
 }
 
+/* #1516 — groups the research chip + pips on the right so `.ak-card__top`'s
+   space-between still sees exactly 2 top-level children (#id, this group) —
+   without it, a 3rd bare child would float the pips into the middle. */
+.ak-card__top-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .ak-card__id {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -936,6 +952,34 @@ button {
   color: color-mix(in srgb, var(--live) 75%, #cfe);
   border-color: color-mix(in srgb, var(--live) 35%, transparent);
   background: color-mix(in srgb, var(--live) 9%, transparent);
+}
+
+/* #1516 — research/search seat chip. Same shape as .ak-tag--epic (proven pattern),
+   own hue (--research, violet) so it never reads as a pipeline pip or an epic ref.
+   `--research-open` (an un-close-stamped comment) gets a faint opacity-only pulse
+   — a new keyframe rather than reusing ak-pulse/ak-working-pulse, both of which
+   also scale(); scaling a short text chip reads as a jitter, not a breath. */
+.ak-tag--research {
+  color: color-mix(in srgb, var(--research) 80%, #eee);
+  border-color: color-mix(in srgb, var(--research) 40%, transparent);
+  background: color-mix(in srgb, var(--research) 10%, transparent);
+}
+.ak-tag--research-open {
+  animation: ak-research-pulse 2.2s ease-in-out infinite;
+}
+@keyframes ak-research-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ak-tag--research-open {
+    animation: none;
+  }
 }
 
 .ak-card__foot {

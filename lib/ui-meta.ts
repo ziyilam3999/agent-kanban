@@ -38,6 +38,11 @@ export const ROLE_COLOR: Record<string, string> = {
   executor: "var(--live)",
   "execution-review": "var(--done)",
   orchestrator: "var(--fg-dim)",
+  // #1516 — the research/search seat. Deliberately NOT added to PIPELINE_ROLES
+  // (stays exactly four — research is not a required/gating role), so this is a
+  // keyed lookup with a `?? fallback` (roleColor below), additive only: it can
+  // never corrupt pip count, doneCount, nextPending, or lanes.ts stage math.
+  research: "var(--research)",
 };
 
 /** Mono-caps label per role for the drawer timeline + pip tooltips. */
@@ -47,6 +52,7 @@ export const ROLE_LABEL: Record<string, string> = {
   executor: "EXECUTOR",
   "execution-review": "EXEC-REVIEW",
   orchestrator: "ORCHESTRATOR",
+  research: "RESEARCH",
 };
 
 export function roleColor(role: string): string {

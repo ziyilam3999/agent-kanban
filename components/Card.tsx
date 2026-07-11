@@ -37,6 +37,14 @@ export function Card({ ticket, nowMs, glow, active, sessionLastActive, reduce }:
   const rolesSeen = new Set(ticket.comments.map((c) => c.role));
   const blocked = ticket.blockedBy.length > 0;
   const model = cardModel(ticket);
+  // #1516 — research is deliberately NOT in PIPELINE_ROLES (stays exactly four), so it never
+  // draws a 5th pip. Render it as a distinct chip instead, next to the pips. `researchOpen`
+  // tracks whether ANY research comment is still un-close-stamped (mirrors chainInFlight's
+  // per-comment `!c.closedAt` check) purely for the tooltip/label — informational only, does
+  // NOT drive the card's `active` glow (that's computeActiveIds' job upstream).
+  const researchComments = ticket.comments.filter((c) => c.role === "research");
+  const hasResearch = researchComments.length > 0;
+  const researchOpen = researchComments.some((c) => !c.closedAt);
   // Lift a leading "[#1063]" / "[EPIC]" prefix out of the subject so it doesn't read as a
   // second ticket id next to the card's own #id — render it as a distinct chip instead.
   const subjectTag = parseSubjectTag(ticket.subject);
@@ -55,22 +63,33 @@ export function Card({ ticket, nowMs, glow, active, sessionLastActive, reduce }:
 
       <div className="ak-card__top">
         <span className="ak-card__id">#{ticket.id}</span>
-        <span
-          className="ak-pips ak-pips--dim"
-          role="img"
-          aria-label={`pipeline progress: ${rolesSeen.size} of 4 roles`}
-        >
-          {PIPELINE_ROLES.map((role) => {
-            const on = rolesSeen.has(role);
-            return (
-              <span
-                key={role}
-                className={`ak-pip${on ? " ak-pip--on" : ""}`}
-                style={on ? { ["--pip" as string]: roleColor(role) } : undefined}
-                title={`${roleLabel(role)}${on ? "" : " (pending)"}`}
-              />
-            );
-          })}
+        <span className="ak-card__top-right">
+          {hasResearch && (
+            <span
+              className={`ak-tag ak-tag--research${researchOpen ? " ak-tag--research-open" : ""}`}
+              style={{ ["--research-hue" as string]: roleColor("research") }}
+              title={`${roleLabel("research")}${researchOpen ? " — in flight" : " — done"}`}
+            >
+              {roleLabel("research")}
+            </span>
+          )}
+          <span
+            className="ak-pips ak-pips--dim"
+            role="img"
+            aria-label={`pipeline progress: ${rolesSeen.size} of 4 roles`}
+          >
+            {PIPELINE_ROLES.map((role) => {
+              const on = rolesSeen.has(role);
+              return (
+                <span
+                  key={role}
+                  className={`ak-pip${on ? " ak-pip--on" : ""}`}
+                  style={on ? { ["--pip" as string]: roleColor(role) } : undefined}
+                  title={`${roleLabel(role)}${on ? "" : " (pending)"}`}
+                />
+              );
+            })}
+          </span>
         </span>
       </div>
 

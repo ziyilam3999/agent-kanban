@@ -55,15 +55,16 @@ export type PutFn = (
 
 /** Injectable dependencies for the pure courier unit (hermetic in tests).
  *
- * DELIBERATE EXCLUSION (#1578): there is NO `allowPublish` / `skipGuard` /
- * `force` field here, and there never should be. The publish opt-in guard
- * below is read from the PROCESS ENVIRONMENT inside `uploadBoard()`, never
- * from a caller-supplied dep — a caller-supplied authorization flag is a
- * bypass by another name (it relocates the gate from "the process
- * environment declared publish intent" to "whatever the caller passed",
- * which is the exact trust model that let a test fixture reach production).
- * `put` / `resolveAuth` / `boardPath` / `logPath` / `notify` stay injectable
- * for hermetic testing; the gate does not. */
+ * DELIBERATE EXCLUSION (#1578): this interface deliberately carries NO
+ * caller-supplied publish-authorization field of any kind (no "allow", no
+ * "skip-the-guard", no "force"), and there never should be one. The publish
+ * opt-in guard below is read from the PROCESS ENVIRONMENT inside
+ * `uploadBoard()`, never from a dep — an authorization value the CALLER
+ * supplies is an escape hatch under a different name (it relocates the gate
+ * from "the process environment declared publish intent" to "whatever the
+ * caller passed", which is the exact trust model that let a test fixture
+ * reach production). `put` / `resolveAuth` / `boardPath` / `logPath` /
+ * `notify` stay injectable for hermetic testing; the gate does not. */
 export interface UploadDeps {
   put: PutFn;
   resolveAuth: () => BlobAuth;

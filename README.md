@@ -67,6 +67,32 @@ The courier re-pulls it automatically near expiry (`OIDC_TOKEN_FILE` /
 `OIDC_REFRESH_SKEW_S` override the path/window). After the first upload, set the
 printed `BOARD_BLOB_URL=<url>` in the Vercel project env. See `.env.example`.
 
+**Publish guard — inert by default (#1578).** A test/verification run once published a
+one-ticket fixture board to the LIVE production blob (root cause: one stable blob
+pathname, ambient credentials on disk, and no environment separation on the write
+path). `npm run kanban:upload` / `npm run kanban:sync` / a direct `tsx
+scripts/upload-board.ts` are now **inert unless explicitly told to publish**: the
+courier refuses (`result: "refused"`, `reason: "publish-optin-missing"` in
+`data/sync.log`) before resolving any credential unless `BOARD_PUBLISH=1` is present
+in its environment. The **only** code path that sets this marker is the installed
+hook (`scripts/on-task-change.sh`), for its own courier invocation.
+
+Even with publishing authorized, the courier also refuses a board that *looks*
+synthetic (`reason: "synthetic-board"`) — smaller than 20,000 bytes, fewer than 10
+tickets, any ticket carrying the reserved id `9999`, or a session id/summary
+prefixed `demo`/`test`/`smoke`. **Id `9999` is formally reserved for tests** — if the
+real task store ever reaches a genuine task #9999, the refusal is loud and
+diagnosable in `data/sync.log`; the recovery is renaming that one task.
+
+To publish deliberately from the command line:
+
+```sh
+BOARD_PUBLISH=1 npm run kanban:upload
+```
+
+There is no environment variable that *disables* this guard — `BOARD_PUBLISH=1` is a
+required positive opt-in, not a bypass.
+
 ### Live sync — opt-in PostToolUse hook
 
 `scripts/on-task-change.sh` is an **opt-in** local hook (not auto-installed). Wire it as
@@ -77,10 +103,11 @@ PostToolUse entry to `~/.claude/settings.json` whose command is the absolute pat
 `scripts/on-task-change.sh` (matcher scoped to the task-writing tool you use); it is
 idempotent and fast, so re-running it per change is cheap.
 
-**Sync logbook + background-sync note (#1158, #1405).** Every courier run appends one
-JSONL line to `data/sync.log` (gitignored) recording its outcome — `uploaded` /
-`skipped-no-token` / `failed` (override the path with the `SYNC_LOG` env var). So a sync
-is never silent: if a background run skips, the reason is on the record. Background syncs
+**Sync logbook + background-sync note (#1158, #1405, #1578).** Every courier run appends
+one JSONL line to `data/sync.log` (gitignored) recording its outcome — `uploaded` /
+`skipped-no-token` / `skipped-unchanged` / `failed` / `refused` (override the path with
+the `SYNC_LOG` env var). So a sync is never silent: if a background run skips or is
+refused, the reason is on the record. Background syncs
 authenticate through the OIDC token file (`.env.vercel-oidc.local` by default) — a plain
 file, readable from detached/background shells — which the courier self-refreshes near
 expiry. This adds **no** secret to any committed file. With no reachable credential, the

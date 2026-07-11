@@ -104,12 +104,51 @@ describe("uploadBoard wires the alert (hermetic, injected notify)", () => {
     notify: (title, message) => notifications.push({ title, message }),
   });
 
+  const savedBoardPublish = process.env.BOARD_PUBLISH;
+
+  // #1578: the pre-guard fixture here was `{"schema":1,"tickets":[]}` — 0
+  // tickets, ~26 bytes — which the new fixture-shape floor would refuse
+  // BEFORE the injected failing `put`, silently changing what these
+  // alert-streak tests prove (they exist to show `failed` records, from a
+  // REACHED `put`, drive `consecutiveTrailingFailures` — not `refused`
+  // records). Per the plan's B5 decision, migrate to a floor-passing fixture
+  // rather than re-base the tests on `refused`.
+  function floorPassingBoardJson(): string {
+    return JSON.stringify({
+      schema: 1,
+      generatedAt: 1,
+      sessionId: "a1b2c3d4",
+      sessions: [],
+      tickets: Array.from({ length: 12 }, (_, i) => ({
+        id: String(7000 + i),
+        subject: `Sample ticket ${i}`,
+        description: "Lorem ipsum dolor sit amet. ".repeat(70),
+        column: "todo",
+        status: "pending",
+        blockedBy: [],
+        comments: [],
+        updatedAt: 1,
+        sessionId: "a1b2c3d4",
+      })),
+    });
+  }
+
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "sync-alert-"));
     logPath = path.join(dir, "sync.log");
     boardPath = path.join(dir, "board.json");
-    fs.writeFileSync(boardPath, JSON.stringify({ schema: 1, tickets: [] }));
+    fs.writeFileSync(boardPath, floorPassingBoardJson());
     notifications = [];
+    // #1578: legitimate opt-in via the TEST PROCESS'S OWN environment (see
+    // upload-board.test.ts for the same discipline) — these tests must reach
+    // the `put` path (or its failure) to prove the failure-streak alert.
+    process.env.BOARD_PUBLISH = "1";
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    if (savedBoardPublish === undefined) delete process.env.BOARD_PUBLISH;
+    else process.env.BOARD_PUBLISH = savedBoardPublish;
   });
 
   const seed = (result: SyncRecord["result"]): void =>

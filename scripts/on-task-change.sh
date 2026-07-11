@@ -49,6 +49,12 @@ fi
 # otherwise abort the script before `exit 0`. This is NOT a blind swallow — the
 # courier has ALREADY written its data/sync.log record before exiting, so the outcome
 # is durable; the wrapper only preserves the PostToolUse exit-0 contract.
-npm run --silent kanban:upload >/dev/null 2>&1 || true
+#
+# BOARD_PUBLISH=1 (#1578): this hook is the ONE code path allowed to set the
+# publish opt-in marker, and it sets it ONLY for this courier invocation (a
+# local variable-prefix on this exact command, not `export`ed into the wider
+# shell) — every other way of running the courier (bare `npm run kanban:upload`,
+# an ad-hoc `tsx` invocation, an in-process test call) stays inert by default.
+BOARD_PUBLISH=1 npm run --silent kanban:upload >/dev/null 2>&1 || true
 
 exit 0

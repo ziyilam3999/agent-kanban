@@ -1,23 +1,42 @@
-// on-task-change-hook.test.ts — #1158 Layer B (MANDATORY end-to-end hook smoke).
+// on-task-change-hook.test.ts — #1158 Layer B (MANDATORY end-to-end hook smoke),
+// redesigned for #1578's fail-closed publish guard (AC-3).
 //
-// Runs the REAL scripts/on-task-change.sh and asserts BOTH ends of the shell
-// contract under an env-absent / no-reachable-token setup:
-//   (a) the hook process exits 0 (catches a dropped non-aborting wrapper → set -e
-//       would abort → exit 1), AND
-//   (b) a `skipped-no-token` line was appended to the temp SYNC_LOG (proves the hook
-//       invoked the courier UNCONDITIONALLY end-to-end after the pre-probe removal).
+// This is the ONE test in the suite genuinely wired to production: it strips
+// NODE_ENV so the REAL hook -> REAL main() -> REAL put from @vercel/blob ->
+// REAL defaultResolveBlobAuth all fire (`hookEnv` below). Before #1578 the
+// only thing standing between it and a live publish was a 3-part credential
+// fence. #1578 adds two MORE locks (the publish opt-in + the fixture-shape
+// floor) that live INSIDE uploadBoard() — and this file must prove all of it
+// stays engaged, never traded away to make a fixture "reach" further:
+//
+//   (a) fence-integrity  — MANDATORY pre-assertion, run before every hook
+//       spawn below: all three credential locks are engaged (ambient
+//       VERCEL_OIDC_TOKEN/BLOB_STORE_ID absent, OIDC_TOKEN_FILE points at a
+//       path that does not exist, and the REAL resolver — called in-process
+//       with the child's env — independently confirms mode "none"). A fence
+//       regression now fails RED instead of silently publishing.
+//   (b) marker-proof      — the REAL hook sets BOARD_PUBLISH for its own
+//       courier call, and the EXISTING tiny `#9999` fixture (the incident's
+//       own shape) is still floor-REFUSED (`synthetic-board`, not
+//       `publish-optin-missing`, not `skipped-no-token`) — proving the hook
+//       sets the marker while BOTH new locks stay engaged and the courier
+//       never reaches auth or `put`.
+//   (c) traversal          — a REAL-SHAPED fixture (>=10 tickets, exported
+//       board >=20,000 bytes, hex-prefix session, no id 9999) clears BOTH
+//       guards and reaches credential resolution (`skipped-no-token`) — the
+//       #1158 Layer-B contract (hook-invoked courier traverses to auth) kept
+//       alive under the new guards.
 //
 // HERMETICITY (R2-MED-1 + #1050 B1 fence, updated for #1405's OIDC-only 2-arm
 // reality): (a) the ambient VERCEL_OIDC_TOKEN / BLOB_STORE_ID env vars are
 // DELETED, (b) OIDC_TOKEN_FILE points at a NONEXISTENT temp path (so the real
 // repo-root token file — which EXISTS with a live token after rollout — is
-// never read; this is the red-on-regression proof that the env override is
-// honored by the real default deps), and (c) a fake `vercel` stub (exit 1)
-// sits on a prepended PATH so the refresh/bootstrap pull arm is inert. A
-// `security` stub is KEPT beside it as defense-in-depth (see beforeEach). We
-// also point TASKS_DIR + OUT at temp paths so export:board is hermetic and
-// never reads/writes the real ~/.claude state or the repo's data/board.json.
-// No real Keychain, no network, no real CLI, on ANY host.
+// never read), and (c) a fake `vercel` stub (exit 1) sits on a prepended PATH
+// so the refresh/bootstrap pull arm is inert for the SPAWNED child. A
+// `security` stub is kept beside it as defense-in-depth. We also point
+// TASKS_DIR + OUT at temp paths so export:board is hermetic and never
+// reads/writes the real ~/.claude state or the repo's data/board.json. No
+// real Keychain, no network, no real CLI, on ANY host.
 
 import { spawnSync } from "node:child_process";
 import {
@@ -31,6 +50,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { readSyncLog } from "@/lib/sync-log";
+import { defaultResolveBlobAuth } from "@/scripts/blob-auth";
 
 const HOOK = join(process.cwd(), "scripts", "on-task-change.sh");
 
@@ -60,6 +80,25 @@ function hookEnv(extra: Record<string, string>): Record<string, string | undefin
   return env;
 }
 
+/**
+ * (a) fence-integrity — MANDATORY pre-assertion (#1578 AC-3a), run before
+ * every hook spawn in this file. Two cheap static checks plus one dynamic,
+ * COMPLETE check: calling the REAL resolver in-process with the child's env
+ * covers every arm (present and future), not just the three known ones.
+ *
+ * `pullEnv` MUST be neutralized here (r2 note N-D's caveat): the refresh arm
+ * execs the real `vercel` binary, and this assertion runs in the PARENT jest
+ * process, whose PATH does NOT carry the fenced `vercel`-fails stub the
+ * CHILD process gets below — a live `pullEnv` here would shell out to the
+ * real Vercel CLI. Forcing it to fail keeps this assertion itself hermetic.
+ */
+function assertFenceEngaged(env: Record<string, string | undefined>): void {
+  expect(env.VERCEL_OIDC_TOKEN).toBeUndefined();
+  expect(env.BLOB_STORE_ID).toBeUndefined();
+  const auth = defaultResolveBlobAuth({ env, pullEnv: () => false });
+  expect(auth.mode).toBe("none");
+}
+
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "akb-hook-"));
   logPath = join(root, "sync.log");
@@ -85,10 +124,11 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-describe("on-task-change.sh — #1158 Layer B mandatory hook smoke", () => {
-  it("AC-HOOK-SMOKE: env-absent + neutralized Keychain → hook exits 0 AND logs `skipped-no-token`", () => {
-    // A hermetic tasks dir with one valid session so export:board succeeds and writes
-    // a board snapshot the courier can then attempt to upload.
+describe("on-task-change.sh — #1158 Layer B / #1578 AC-3 mandatory hook smoke", () => {
+  it("AC-3 fence-integrity + marker-proof: hook sets BOARD_PUBLISH, tiny #9999 fixture stays floor-REFUSED (synthetic-board)", () => {
+    // The incident's own shape: a hermetic tasks dir with one valid session
+    // holding the reserved test ticket #9999, so export:board succeeds and
+    // writes a board snapshot the courier can then attempt to upload.
     const tasksDir = join(root, "tasks");
     const session = join(tasksDir, "smoke-session-1158");
     mkdirSync(session, { recursive: true });
@@ -105,23 +145,93 @@ describe("on-task-change.sh — #1158 Layer B mandatory hook smoke", () => {
       "utf8"
     );
     const boardPath = join(root, "board.json");
+    const env = hookEnv({ TASKS_DIR: tasksDir, OUT: boardPath });
+
+    // (a) fence-integrity — before spawning, confirm all three credential
+    // locks are engaged.
+    assertFenceEngaged(env);
 
     const res = spawnSync("bash", [HOOK], {
-      env: hookEnv({ TASKS_DIR: tasksDir, OUT: boardPath }) as unknown as NodeJS.ProcessEnv,
+      env: env as unknown as NodeJS.ProcessEnv,
       encoding: "utf8",
     });
 
-    // End (a): the hook preserved the PostToolUse exit-0 contract under set -e.
+    // The hook preserved the PostToolUse exit-0 contract under set -e.
     expect(res.status).toBe(0);
 
-    // End (b): the courier ran unconditionally and logged a precise skip.
+    // (b) marker-proof — only a marker-setting hook can produce
+    // `synthetic-board` here (the opt-in guard runs BEFORE the floor, so a
+    // hook that failed to set BOARD_PUBLISH would show
+    // `publish-optin-missing` instead) — yet the tiny #9999 fixture still
+    // trips the shape floor: BOTH new locks stayed engaged and the courier
+    // never reached auth or `put`.
     const recs = readSyncLog(logPath);
-    const skips = recs.filter((r) => r.result === "skipped-no-token");
-    expect(skips.length).toBeGreaterThanOrEqual(1);
-    expect(skips[0].reason).toBeTruthy();
+    const refusedSynthetic = recs.filter(
+      (r) => r.result === "refused" && r.reason === "synthetic-board"
+    );
+    expect(refusedSynthetic.length).toBeGreaterThanOrEqual(1);
+    expect(
+      recs.filter((r) => r.reason === "publish-optin-missing")
+    ).toHaveLength(0);
+    expect(recs.filter((r) => r.result === "skipped-no-token")).toHaveLength(
+      0
+    );
 
     // Hermeticity: nothing in the log leaks a home path or a token. The probe is
     // built from fragments so the literal never appears in this file (F1).
+    const homeProbe = "/Use" + "rs/";
+    for (const r of recs) {
+      expect(JSON.stringify(r)).not.toContain(homeProbe);
+    }
+  });
+
+  it("AC-3 traversal: real hook + real-shaped fixture clears BOTH guards, reaches credential resolution (skipped-no-token)", () => {
+    // A real-shaped fixture store: >=10 tickets, a hex-prefix session dir
+    // name (export-board.ts slices the dir name to 8 chars for both
+    // Ticket.sessionId and Board.sessionId), no id 9999, and descriptions
+    // padded so the EXPORTED board.json clears the 20,000-byte floor arm
+    // (>=10 tickets alone does not guarantee it — r2 note N-E).
+    const tasksDir = join(root, "tasks");
+    const sessionName = "a1b2c3d4-traversal-fixture";
+    const session = join(tasksDir, sessionName);
+    mkdirSync(session, { recursive: true });
+    for (let i = 0; i < 12; i++) {
+      writeFileSync(
+        join(session, `${6000 + i}.json`),
+        JSON.stringify({
+          id: String(6000 + i),
+          subject: `Traversal fixture ticket ${i}`,
+          description: "Lorem ipsum dolor sit amet. ".repeat(80),
+          status: "pending",
+          blocks: [],
+          blockedBy: [],
+        }),
+        "utf8"
+      );
+    }
+    const boardPath = join(root, "board.json");
+    const env = hookEnv({ TASKS_DIR: tasksDir, OUT: boardPath });
+
+    // (a) fence-integrity, same mandatory pre-assertion as the marker-proof case.
+    assertFenceEngaged(env);
+
+    const res = spawnSync("bash", [HOOK], {
+      env: env as unknown as NodeJS.ProcessEnv,
+      encoding: "utf8",
+    });
+
+    expect(res.status).toBe(0);
+
+    // (c) traversal — both new guards were cleared (opt-in: the hook set the
+    // marker; floor: the fixture is real-shaped), so the hook-invoked
+    // courier reached credential resolution and recorded the honest
+    // no-reachable-credential outcome, never a refusal.
+    const recs = readSyncLog(logPath);
+    expect(
+      recs.filter((r) => r.result === "skipped-no-token").length
+    ).toBeGreaterThanOrEqual(1);
+    expect(recs.filter((r) => r.result === "refused")).toHaveLength(0);
+
     const homeProbe = "/Use" + "rs/";
     for (const r of recs) {
       expect(JSON.stringify(r)).not.toContain(homeProbe);

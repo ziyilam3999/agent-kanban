@@ -11,12 +11,19 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-/** Closed outcome enum — exactly these four values, no overlap. */
+/** Closed outcome enum — exactly these five values, no overlap.
+ * `refused` (#1578) is the publish-guard's outcome: the courier deliberately
+ * did not attempt a network write because the publish opt-in marker was
+ * missing (`publish-optin-missing`) or the board content failed the
+ * fixture-shape floor (`synthetic-board`). It counts as a non-success outcome
+ * everywhere `result` is consumed (consecutiveTrailingFailures already fails
+ * closed on anything outside `uploaded` / `skipped-unchanged`). */
 export type SyncResult =
   | "uploaded"
   | "skipped-no-token"
   | "skipped-unchanged"
-  | "failed";
+  | "failed"
+  | "refused";
 
 /** One line of the sync logbook. */
 export interface SyncRecord {

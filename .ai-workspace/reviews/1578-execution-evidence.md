@@ -230,6 +230,18 @@ Arm 2 (DI-surface auth):     0
 Arm 2 positive control:      1
 ```
 
+**One iteration on arm 2, worth recording honestly.** The first commit's
+`UploadDeps` docstring documented the exclusion by NAMING the forbidden field
+tokens in prose ("there is NO `allowPublish` / `skipGuard` / ... a bypass by
+another name"), which tripped arm 2's own literal-token grep — a genuine
+false positive (2 matches, both comment prose explaining why the fields don't
+exist, not the fields themselves; verified with `grep -E` directly against
+the matched lines). Rather than weaken AC-6's grep to special-case comments,
+the docstring was reworded to convey the same exclusion without the literal
+substrings (commit `f603f0f`) — no behavior change, same guarantee, and now
+arm 2 genuinely prints 0 against real content, not past a hand-waved
+carve-out.
+
 (Grep verdicts via `command grep -Ec` + numeric compare, never through
 `| head`/`| tail`; positive controls run in the same invocation shape.)
 

@@ -1,6 +1,6 @@
 # ui-evolve verdict — #1516 research-seat card chip
 
-**verdict: ACCEPT**
+verdict: ACCEPT
 
 - **Total: 19 / 20** (threshold: ≥16/20 AND no axis <3 — cleared)
 - Scored against the design brief's §5 rubric (`.ai-workspace/design/1516-research-chip-brief.md`), from REAL Playwright screenshots (Node `playwright-core` 1.61.1, headless Chromium) of the app running locally (`npm run dev`, `http://localhost:3000`) against a fixture at `data/board.json` (gitignored local-dev override) carrying three deliberately chosen cards: `#301` (EPIC tag + full 4-pip pipeline + an OPEN research chip — the crowded stress case), `#302` (research-only ticket, CLOSED research row), `#303` (no research comment at all — the graceful-absence baseline).

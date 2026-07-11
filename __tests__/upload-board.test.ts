@@ -28,12 +28,35 @@ import { readSyncLog } from "@/lib/sync-log";
 jest.mock("@vercel/blob", () => ({ put: jest.fn() }));
 
 const FAKE_URL = "https://blob.example.test/board.json";
-const BOARD_BODY = JSON.stringify({ generatedAt: 1, tickets: [] });
+// #1578: every fixture in this file must clear the fixture-shape floor
+// (>=10 tickets, >=20,000 bytes, no id "9999", hex-prefix sessionId) so the
+// publish-guard runs OUT of the way and these tests keep exercising exactly
+// what they exercised before the guard existed (auth branching, put options,
+// the failure-streak alert, the #1358 hash dedup). Tests that exercise the
+// guard itself live in __tests__/publish-guard.test.ts.
+const BOARD_BODY = JSON.stringify({
+  schema: 1,
+  generatedAt: 1,
+  sessionId: "a1b2c3d4",
+  sessions: [],
+  tickets: Array.from({ length: 12 }, (_, i) => ({
+    id: String(5000 + i),
+    subject: `Sample ticket ${i}`,
+    description: "Lorem ipsum dolor sit amet. ".repeat(70),
+    column: "todo",
+    status: "pending",
+    blockedBy: [],
+    comments: [],
+    updatedAt: 1,
+    sessionId: "a1b2c3d4",
+  })),
+});
 const ENUM = new Set([
   "uploaded",
   "skipped-no-token",
   "skipped-unchanged",
   "failed",
+  "refused",
 ]);
 // Privacy probe built from fragments so the literal never appears in this file (F1).
 const HOME_PROBE = "/Use" + "rs/";
@@ -57,12 +80,18 @@ let root: string;
 let boardPath: string;
 let logPath: string;
 const savedOut = process.env.OUT;
+const savedBoardPublish = process.env.BOARD_PUBLISH;
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "akb-upload-"));
   boardPath = join(root, "board.json");
   logPath = join(root, "sync.log");
   writeFileSync(boardPath, BOARD_BODY, "utf8");
+  // #1578: this file drives uploadBoard() IN-PROCESS to reach the auth/put
+  // paths its tests exist to cover — that is legitimate opt-in via the TEST
+  // PROCESS'S OWN environment (unreachable from a real run, whose environment
+  // is not a jest process's environment), never via a UploadDeps field.
+  process.env.BOARD_PUBLISH = "1";
 });
 
 afterEach(() => {
@@ -70,6 +99,8 @@ afterEach(() => {
   jest.restoreAllMocks();
   if (savedOut === undefined) delete process.env.OUT;
   else process.env.OUT = savedOut;
+  if (savedBoardPublish === undefined) delete process.env.BOARD_PUBLISH;
+  else process.env.BOARD_PUBLISH = savedBoardPublish;
 });
 
 /** One seeded JSONL record (newest-last file order is the caller's responsibility). */

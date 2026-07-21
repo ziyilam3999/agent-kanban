@@ -91,6 +91,16 @@ export interface Ticket {
    * the view falls back to showing all tickets when none is tagged.
    */
   sessionId?: string;
+  /**
+   * The agent's own reason for deliberately parking this ticket (#1816),
+   * copied verbatim (redacted) from `RawTask.metadata.on_hold`. A NON-EMPTY
+   * string means the card is on hold; absent means not held — the backing
+   * `status`/`column` are UNCHANGED either way (an on-hold card keeps
+   * `status: in_progress`), so this is a purely additive read/render-path
+   * signal, not a new lifecycle state. Terminal status always wins: a
+   * `completed` ticket's `onHold` is ignored by every consumer.
+   */
+  onHold?: string;
 }
 
 /** A selectable session (one board). */

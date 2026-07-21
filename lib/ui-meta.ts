@@ -120,6 +120,42 @@ export function verdictHue(v: string): string {
 export const WORK_PIPELINE_ROLES = new Set<string>(["planner", "executor"]);
 
 /**
+ * TRUE iff a ticket should render the ON-HOLD treatment (#1816): a non-empty
+ * `onHold` reason AND the ticket is still in the `in_progress` column. The
+ * column gate is what makes "terminal status wins" (state 4 — AC10) hold by
+ * construction: `toColumn` never routes a `completed` task back through
+ * `in_progress`, so a stale `onHold` string left on an already-shipped task
+ * can never re-trigger the treatment. Single predicate reused by the phase
+ * line, the footer age readout, the card's rail/opacity state hook, the
+ * drawer chip, and the active-set exclusion — one place decides "is this
+ * card actually held," so none of those consumers can drift out of sync.
+ */
+export function isHeld(ticket: Ticket): boolean {
+  return Boolean(ticket.onHold) && ticket.column === "in_progress";
+}
+
+/**
+ * Footer age readout `⏸ held Nd` (#1816, AC8). Reuses the EXACT client-clock
+ * mechanism the SHIPPING→STALE pill already uses (`nowMs - ticket.updatedAt`)
+ * — no new plumbing. Honest semantic (cairn: SHIPPING-STALE cry-wolf lesson):
+ * `updatedAt` is board-write age (task-file mtime, folded with ledger mtime),
+ * NOT a "first parked" timestamp — setting `on_hold` via TaskUpdate bumps the
+ * task-file mtime, so a later unrelated ledger append also resets this
+ * counter downward. That is accepted, not a bug to "fix" here (see the plan's
+ * non-blocking note 1). Fails safe: returns undefined (no crash, no bogus/
+ * negative number) when the ticket isn't held, or `nowMs` is unavailable/
+ * non-finite.
+ */
+export function heldFor(ticket: Ticket, nowMs?: number): string | undefined {
+  if (!isHeld(ticket)) return undefined;
+  if (nowMs === undefined || !Number.isFinite(nowMs)) return undefined;
+  const diff = nowMs - ticket.updatedAt;
+  if (!Number.isFinite(diff)) return undefined;
+  const days = Math.max(0, Math.floor(diff / 86_400_000));
+  return `⏸ held ${days}d`;
+}
+
+/**
  * The latest review verdict for a ticket, preferring an execution-review over a
  * plan-review. Comments are oldest-first, so the LAST match of each role wins.
  * Returns undefined when neither review role carries a verdict.
@@ -311,6 +347,22 @@ export function phaseLine(
         ariaLabel: "queued, no role yet",
       };
     case "in_progress": {
+      // #1816 — ON-HOLD OVERRIDES the role/active phase line, but only inside
+      // this in_progress branch: a completed ticket's column is "done" and
+      // never reaches here, so terminal status always wins (AC10) without an
+      // extra check. The ⏸ glyph extends the existing phase glyph vocabulary
+      // (▶ ◆ ✓ ✕ ⛔). aria-label carries the reason, capped to ~60 chars so a
+      // very long reason never balloons the accessible name.
+      if (isHeld(ticket)) {
+        const reason = ticket.onHold ?? "";
+        const capped =
+          reason.length > 60 ? `${reason.slice(0, 60)}…` : reason;
+        return {
+          text: "⏸ ON HOLD",
+          hueVar: "var(--hold)",
+          ariaLabel: `on hold — ${capped}`,
+        };
+      }
       let role: string | undefined;
       for (const c of ticket.comments) {
         if (WORK_PIPELINE_ROLES.has(c.role)) role = c.role;

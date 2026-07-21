@@ -10,7 +10,14 @@ import {
 } from "motion/react";
 import type { Ticket } from "@/lib/board-schema";
 import { COLUMN_LABELS } from "@/lib/board-schema";
-import { abbreviateModel, COLUMN_HUE, roleColor, roleLabel, verdictHue } from "@/lib/ui-meta";
+import {
+  abbreviateModel,
+  COLUMN_HUE,
+  isHeld,
+  roleColor,
+  roleLabel,
+  verdictHue,
+} from "@/lib/ui-meta";
 import { resolveStageBar } from "@/lib/stage-bar";
 import { relativeTime, elapsedGap } from "@/lib/relative-time";
 
@@ -284,6 +291,14 @@ export function Drawer({ ticket, nowMs, onClose }: DrawerProps) {
               >
                 {COLUMN_LABELS[ticket.column]}
               </span>
+              {isHeld(ticket) && (
+                <span
+                  className="ak-chip"
+                  style={{ ["--hue" as string]: "var(--hold)" }}
+                >
+                  ⏸ ON HOLD
+                </span>
+              )}
               <button
                 ref={closeRef}
                 type="button"
@@ -311,6 +326,13 @@ export function Drawer({ ticket, nowMs, onClose }: DrawerProps) {
 
               {ticket.description && (
                 <p className="ak-drawer__desc">{ticket.description}</p>
+              )}
+
+              {isHeld(ticket) && (
+                <div className="ak-drawer__hold-reason">
+                  <p className="ak-drawer__section">⏸ On hold — reason</p>
+                  <p className="ak-drawer__hold-reason-text">{ticket.onHold}</p>
+                </div>
               )}
 
               <PipelineProgress ticket={ticket} />

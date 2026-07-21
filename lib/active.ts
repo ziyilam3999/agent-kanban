@@ -89,12 +89,23 @@ const PIPELINE_ROLE_SET = new Set<string>(PIPELINE_ROLES);
 export function chainInFlight(t: Ticket): boolean {
   let hasPipelineComment = false;
   let newestExecReview: Ticket["comments"][number] | undefined;
+  let pipelineCommentAfterNewestReview = false;
   for (const c of t.comments) {
     if (PIPELINE_ROLE_SET.has(c.role)) hasPipelineComment = true;
-    if (c.role === "execution-review") newestExecReview = c;
+    if (c.role === "execution-review") {
+      newestExecReview = c;
+      pipelineCommentAfterNewestReview = false; // reset: nothing since THIS review yet
+    } else if (PIPELINE_ROLE_SET.has(c.role) && newestExecReview !== undefined) {
+      pipelineCommentAfterNewestReview = true;
+    }
   }
   if (hasPipelineComment) {
     if (newestExecReview === undefined) return true; // punched IN, no review yet
+    // #1791: a NEW pipeline comment landing after the newest execution-review
+    // means a fresh round started (possibly reusing this ticket id across two
+    // semantically distinct rounds) -- that earlier review's verdict no
+    // longer speaks for the CURRENT round, no matter what it said.
+    if (pipelineCommentAfterNewestReview) return true;
     const verdict = (newestExecReview.verdict ?? "").trim();
     if (verdict === "") return true; // unresolved review — still in flight
     return isFailClassVerdict(verdict); // fail-class stays in-flight; PASS completes

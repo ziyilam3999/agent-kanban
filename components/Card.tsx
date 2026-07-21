@@ -5,6 +5,8 @@ import {
   abbreviateModel,
   cardModel,
   COLUMN_HUE,
+  heldFor,
+  isHeld,
   PIPELINE_ROLES,
   phaseLine,
   roleColor,
@@ -48,11 +50,20 @@ export function Card({ ticket, nowMs, glow, active, sessionLastActive, reduce }:
   // Lift a leading "[#1063]" / "[EPIC]" prefix out of the subject so it doesn't read as a
   // second ticket id next to the card's own #id — render it as a distinct chip instead.
   const subjectTag = parseSubjectTag(ticket.subject);
+  // #1816 — on-hold state hook (AC7): a stable class that (a) pins the rail
+  // hue to var(--hold) and (b) recedes the tile — opacity/transform only, zero
+  // layout shift. `held` never coincides with `active` (computeActiveIds
+  // excludes held tickets from the lane population upstream), so the rail
+  // never has to arbitrate between the mint "breathing" treatment and the
+  // static ochre one.
+  const held = isHeld(ticket);
+  const heldFooter = heldFor(ticket, nowMs);
 
   const cls = [
     "ak-card",
     glow ? (reduce ? "ak-card--flash" : "ak-card--live") : "",
     active ? "ak-card--active" : "",
+    held ? "ak-card--hold" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -119,6 +130,7 @@ export function Card({ ticket, nowMs, glow, active, sessionLastActive, reduce }:
             ⛔ blocked by #{ticket.blockedBy.join(", #")}
           </span>
         )}
+        {heldFooter && <span className="ak-hold-footer">{heldFooter}</span>}
         {model && (
           <span className="ak-model">
             {abbreviateModel(model.version)}

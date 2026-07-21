@@ -37,6 +37,13 @@
      (relative-luminance formula, both sRGB->linear) — clears AA (4.5:1). */
   --research: #b98ef2;
 
+  /* On-hold seat (#1816) — a dusty, deliberately DULLER/COOLER ochre than
+     --review's bright amber (#f2b03e) so a parked card is never mistaken for
+     an IN-REVIEW one at a glance. WCAG-verified ~7.118:1 on --panel (same
+     sRGB->linear relative-luminance method as --research above) — clears AA
+     (4.5:1) with headroom. */
+  --hold: #c99a4c;
+
   /* Atmosphere */
   --dot: rgba(124, 138, 150, 0.10);
   --radius: 10px;
@@ -613,6 +620,42 @@ button {
   }
 }
 
+/* On-hold state (#1816) — "powered down on purpose". Deliberately the
+   OPPOSITE of .ak-card--active: a STATIC ochre rail (no ak-rail-breathe
+   animation — held cards are never in the active set, so this class and
+   .ak-card--active never coexist on the same element, but the rail rule is
+   written to win on specificity regardless), and the tile recedes to ~0.82
+   opacity so a stack of cyan PROG cards makes a held card spottable without
+   reading the phase line (R3). Transform/opacity only — zero layout shift,
+   same discipline as every other card-state treatment on this page. */
+.ak-card--hold {
+  opacity: 0.82;
+}
+.ak-card--hold .ak-card__rail {
+  background: var(--hold);
+}
+
+/* Footer age readout `⏸ held Nd` (#1816, AC8) — same visual weight/shape as
+   .ak-model's meta pill but tinted --hold so it reads as part of the on-hold
+   signal cluster, not a neutral timestamp. Sits between the (optional) coral
+   blocked pill and the model pill so state 3 (on-hold AND blocked) shows both
+   without crowding — each is its own small pill, footer already wraps/shrinks
+   via flex like every other foot child. */
+.ak-hold-footer {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--hold);
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--hold) 35%, transparent);
+  background: color-mix(in srgb, var(--hold) 9%, transparent);
+  white-space: nowrap;
+}
+
 /* ----------------------------------------------------- Header status cluster */
 /* Lane counter sits left of the LIVE/IDLE badge in the header row. */
 .ak-status {
@@ -1183,6 +1226,32 @@ button {
   text-transform: uppercase;
   color: var(--fg-meta);
   margin: 0 0 12px;
+}
+
+/* On-hold reason block (#1816) — sits above the timeline (right after the
+   description), a quiet ochre-bordered card that renders the agent's own
+   (already-redacted) parking note in full. Its own --hue-tinted `.ak-drawer__section`
+   label doubles as this block's section header (re-tinted here so it doesn't
+   read as the neutral meta-grey used elsewhere in the body). */
+.ak-drawer__hold-reason {
+  border: 1px solid color-mix(in srgb, var(--hold) 35%, transparent);
+  background: color-mix(in srgb, var(--hold) 8%, transparent);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 16px;
+}
+
+.ak-drawer__hold-reason .ak-drawer__section {
+  color: var(--hold);
+  margin: 0 0 6px;
+}
+
+.ak-drawer__hold-reason-text {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fg);
+  margin: 0;
 }
 
 /* Pipeline stage bar — 4 pills (planner → plan-review → executor → exec-review).

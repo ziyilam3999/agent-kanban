@@ -13,7 +13,12 @@
 // while it was genuinely touched within the (widened) window, for parallel work.
 
 import type { Ticket } from "./board-schema";
-import { PIPELINE_ROLES, isFailClassVerdict, shippingAfterPass } from "./ui-meta";
+import {
+  isHeld,
+  PIPELINE_ROLES,
+  isFailClassVerdict,
+  shippingAfterPass,
+} from "./ui-meta";
 
 /** A ticket is "active" when its session is live and updated within this window
  *  — widened from 3 min because the file-mtime touch cadence is coarse. The
@@ -162,8 +167,15 @@ export function computeActiveIds(
   // ledgers); a mixed valid/NaN ledger can diverge — see the mixed-ts pin in
   // monotonic-flow.test.ts. Revisit this filter if a future Column value is
   // ever added.
+  // #1816 — an on-hold ticket is EXCLUDED from the lane population entirely
+  // (the cleanest exclusion point, per plan-review note 3): it cascades to
+  // every disjunct below (in-flight, focus, window) AND, for free, to
+  // deriveLanes/the "N LANES LIVE" counter (both derive from computeActiveIds'
+  // returned set) — so a held card never breathes (no ak-card--active / no
+  // ak-phase--live) and never inflates the live-lane count, with zero extra
+  // plumbing beyond this one filter clause.
   const inProgress = tickets.filter(
-    (t) => t.column === "in_progress" || shippingAfterPass(t)
+    (t) => (t.column === "in_progress" || shippingAfterPass(t)) && !isHeld(t)
   );
   if (inProgress.length === 0) return active;
 

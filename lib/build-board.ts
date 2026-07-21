@@ -38,6 +38,17 @@ export interface RawTask {
   status: "pending" | "in_progress" | "completed";
   blocks: string[];
   blockedBy: string[];
+  /**
+   * Free-form agent-authored metadata bag (#1816). ONLY `on_hold` is read
+   * today — the contract: a NON-EMPTY `on_hold` string means the card is
+   * held on purpose, and the string IS the human-readable reason shown in
+   * the drawer. Empty/absent `on_hold` (or absent `metadata` entirely) means
+   * not held — byte-identical to a pre-#1816 task file. Type-widening only:
+   * `readTask` (scripts/export-board.ts) does a plain `JSON.parse(...) as
+   * RawTask` cast (not a field whitelist), so `metadata` already reaches
+   * `buildTicket` at runtime with zero exporter changes.
+   */
+  metadata?: { on_hold?: string };
 }
 
 /** One parsed line from a ~/.claude/3role-ledger/<session>/<id>.jsonl file. */
@@ -336,6 +347,15 @@ export function buildTicket(
     updatedAt: Math.max(mtimeMs, ledgerMtimeMs ?? 0),
   };
   if (sessionId) ticket.sessionId = sessionId;
+  // #1816 — no spread in this builder (deliberate, see the interface docs above),
+  // so the optional `onHold` copy needs its own explicit conditional field. Only
+  // a NON-EMPTY `on_hold` string sets it (truthy guard — "" / undefined / no
+  // `metadata` at all are all "not held", byte-identical to pre-#1816 output).
+  // redact() strips any home path the agent's free-form reason might carry
+  // before it ever reaches a component.
+  if (rawTask.metadata?.on_hold) {
+    ticket.onHold = redact(rawTask.metadata.on_hold);
+  }
   return ticket;
 }
 

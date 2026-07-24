@@ -8,6 +8,22 @@
 //
 // Pure number-fed (buildTicket + synthetic RawLedgerLine[] — no fs, no network),
 // same discipline as lane-mtime-undercount.test.ts. All fixture data synthetic.
+//
+// #1852 r3 — AC-1 REWRITE (mandatory reconciliation, plan-review r1's
+// "reconciliation the executor MUST handle"). The ORIGINAL AC-1 below asserted
+// "an in-flight chain 2h stale -> ACTIVE" using an agentId-less fixture — that
+// assertion IS the #1852 false positive baked in as a passing test (chainInFlight's
+// pre-#1852 pipeline branch has no punch-out/running-agent input at all, so ANY
+// incomplete-by-state chain reads in-flight forever, bounded only by the 6h cap).
+// It is RED on origin/master under the NEW mechanism-(b) semantics: a genuinely
+// dead chain (every pipeline-role agent punched OUT via `closedAt`, per r3 AC-9's
+// per-agentId rule) must now read DARK even mid-cap. The rewritten AC-1 below
+// makes that the discriminator, with a delete-the-input oracle proving the
+// verdict turns on the punch-out signal, not on elapsed time. Every OTHER test
+// in this file uses agentId-LESS fixtures (the pre-#1852 idiom) — under the new
+// mechanism these are back-compat "always open" units (see pipelineHasOpenPunchIn
+// in lib/active.ts), so they are UNCHANGED and continue to exercise the cap /
+// focus-conditioning behavior this file already proved, byte-identically.
 
 import {
   buildTicket,
@@ -36,13 +52,26 @@ function inProgressTask(id: string): RawTask {
   };
 }
 
-/** Synthetic ledger line, ts offset minutes before NOW. */
-function line(role: string, minsAgo: number, verdict?: string): RawLedgerLine {
+/**
+ * Synthetic ledger line, ts offset minutes before NOW. The 3rd arg accepts
+ * either a bare verdict string (the original idiom — no agentId/closedAt,
+ * back-compat "always open" per pipelineHasOpenPunchIn) OR (#1852 r3) a
+ * partial-fields object so a fixture can set agentId / closedAt explicitly.
+ */
+function line(
+  role: string,
+  minsAgo: number,
+  verdictOrFields?: string | Partial<RawLedgerLine>
+): RawLedgerLine {
   const l: RawLedgerLine = {
     role,
     ts: new Date(NOW - minsAgo * MIN).toISOString(),
   };
-  if (verdict !== undefined) l.verdict = verdict;
+  if (typeof verdictOrFields === "string") {
+    l.verdict = verdictOrFields;
+  } else if (verdictOrFields) {
+    Object.assign(l, verdictOrFields);
+  }
   return l;
 }
 
@@ -57,18 +86,56 @@ function focusTicket() {
 }
 
 describe("#1403 — chain-state lane liveness (in-flight chains survive silent legs)", () => {
-  it("AC-1: NON-focus in-flight chain, updatedAt 2h stale → ACTIVE (RED on master)", () => {
+  it("AC-1 (#1852 r3 REWRITE): NON-focus in-flight-by-state chain, 2h stale, ALL pipeline agents punched-OUT (closedAt) → NOT active (RED on origin/master)", () => {
+    // RED-on-baseline: on origin/master (pre-#1852), chainInFlight's pipeline
+    // branch ignores closedAt entirely, so this SAME fixture reads ACTIVE —
+    // this assertion genuinely fails there (verified by hand: `git stash` to
+    // pre-#1852 lib/active.ts + re-run this suite -> this exact expectation
+    // flips). It passes ONLY once the pipeline branch consumes the per-agentId
+    // punch-out signal (mechanism (b), AC-9's per-agentId rule).
     const focus = focusTicket();
-    // Chain punched IN (planner + plan-review PASS, no execution-review); its
-    // last observable event (ledger mtime) was 120 min ago — a long silent
-    // executor leg, far outside the 8-min recency window.
+    const CLOSED_TS = new Date(NOW - 125 * MIN).toISOString();
     const underTest = buildTicket(
       inProgressTask("ut"),
-      inFlightComments(),
+      [
+        line("planner", 130, { agentId: "ag-planner-1", closedAt: CLOSED_TS }),
+        line("plan-review", 125, {
+          agentId: "ag-review-1",
+          verdict: "PASS",
+          closedAt: CLOSED_TS,
+        }),
+      ],
       NOW - 120 * MIN,
       SID,
       NOW - 120 * MIN
     );
+    expect(chainInFlight(underTest)).toBe(false);
+    const active = computeActiveIds([focus, underTest], true, NOW);
+    expect(active.has("ut")).toBe(false);
+    expect(active.size).toBe(1); // only the chain-less focus ticket breathes
+  });
+
+  it("AC-1 power-proof #2 (delete-the-input oracle): SAME fixture, clear ONE role's closedAt (open punch-in) → flips back ACTIVE", () => {
+    // Proves the AC-1 verdict turns on the punch-out signal, not on a constant
+    // or on staleness: identical ticket, identical 120-min age, only the
+    // planner row's closedAt is removed (that agent is still punched-IN).
+    const focus = focusTicket();
+    const CLOSED_TS = new Date(NOW - 125 * MIN).toISOString();
+    const underTest = buildTicket(
+      inProgressTask("ut"),
+      [
+        line("planner", 130, { agentId: "ag-planner-1" }), // OPEN — no closedAt
+        line("plan-review", 125, {
+          agentId: "ag-review-1",
+          verdict: "PASS",
+          closedAt: CLOSED_TS,
+        }),
+      ],
+      NOW - 120 * MIN,
+      SID,
+      NOW - 120 * MIN
+    );
+    expect(chainInFlight(underTest)).toBe(true);
     const active = computeActiveIds([focus, underTest], true, NOW);
     expect(active.has("ut")).toBe(true);
     expect(active.size).toBe(2);

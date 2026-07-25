@@ -16,6 +16,19 @@
 // isFailClassVerdict (bounce test) + verdictHue (tint, applied by callers) +
 // the two reuse enablers in ui-meta.ts — no forked fail-class vocabulary.
 
+// #1901 — ZERO-EVIDENCE guard: a ticket with NO pipeline-role comment at all
+// (zero ledger rows, or only free-form roles like orchestrator/research) gets
+// NO pointer and NO lit pill. The old forward-flow fallback
+// (`PIPELINE_ROLES.find(not seen)`) landed on the FIRST array element —
+// planner — so every evidence-less in_progress ticket rendered "PLANNER
+// active", a fabricated claim for single-role dispatches (live-confirmed on
+// tickets #1821/#1898: zero ledger rows on disk, board showed PLANNER lit,
+// while the card list's phaseLine honestly said "WORKING"). The schema
+// carries no dispatch-shape metadata, so a zero-ledger 4-role pipeline and a
+// zero-ledger single-role dispatch are indistinguishable — both get the
+// SAFER generic no-claim state; the first real ledger row lights its role
+// from evidence.
+
 import type { Ticket } from "./board-schema";
 import {
   PIPELINE_ROLES,
@@ -54,6 +67,15 @@ export interface StageBarState {
   terminal: boolean;
   /** True iff a fail-class review bounced the pointer BACK to a prior work role. */
   reworking: boolean;
+  /**
+   * #1901 — TRUE iff NO pipeline role has commented at all (zero ledger
+   * evidence; free-form roles like orchestrator/research do not count). No
+   * pointer, no lit pill: the board must never claim a SPECIFIC role is
+   * active without evidence that role is the one actually running.
+   * Distinguishes "never started / no chain evidence" from `terminal`
+   * (both have pointer === null).
+   */
+  noRoleEvidence: boolean;
   /** The adjacent [workRole, reviewRole] pair the ◄ loopback glyph renders
    * between, or null when there is no active bounce. */
   loopbackGap: readonly [PipelineRole, PipelineRole] | null;
@@ -76,6 +98,12 @@ function roleIndex(role: PipelineRole): number {
  */
 export function resolveStageBar(ticket: Ticket): StageBarState {
   const rolesSeen = new Set(ticket.comments.map((c) => c.role));
+  // #1901 — evidence check FIRST: only PIPELINE roles count (an orchestrator
+  // or research comment is not chain evidence). With zero pipeline comments,
+  // every verdict/bounce branch below is unreachable anyway; the old code fell
+  // through to forward flow and its `.find()` landed on planner by array
+  // position, not by evidence.
+  const noRoleEvidence = !PIPELINE_ROLES.some((r) => rolesSeen.has(r));
   const planVerdict = latestVerdictForRole(ticket, "plan-review");
   const execVerdict = latestVerdictForRole(ticket, "execution-review");
 
@@ -94,7 +122,11 @@ export function resolveStageBar(ticket: Ticket): StageBarState {
    * with a stray comment (#1468 R1 — the exact operator-caught bug). */
   let forceGreyFromIndex: number | null = null;
 
-  if (execPass) {
+  if (noRoleEvidence) {
+    // #1901 — no evidence, no claim: nothing is lit. All pills resolve to
+    // "pending" below (no role is reached, none matches a null pointer).
+    pointer = null;
+  } else if (execPass) {
     pointer = null;
     terminal = true;
   } else if (execFail) {
@@ -137,9 +169,24 @@ export function resolveStageBar(ticket: Ticket): StageBarState {
     return { role, reached, verdict: undefined, look: reached ? "done" : "pending" };
   });
 
-  const ariaLabel = buildAriaLabel(pills, pointer, terminal, reworking, loopbackGap);
+  const ariaLabel = noRoleEvidence
+    ? noEvidenceAriaLabel(ticket)
+    : buildAriaLabel(pills, pointer, terminal, reworking, loopbackGap);
 
-  return { pills, pointer, terminal, reworking, loopbackGap, ariaLabel };
+  return { pills, pointer, terminal, reworking, loopbackGap, noRoleEvidence, ariaLabel };
+}
+
+/**
+ * #1901 — honest label for the zero-evidence state, by ticket status:
+ * an in_progress ticket IS being worked (the task status says so) but no
+ * role has recorded evidence — the same "working, role unknown" the card
+ * list's phaseLine renders; pending → queued; completed → done without a
+ * recorded chain (inline work).
+ */
+function noEvidenceAriaLabel(ticket: Ticket): string {
+  if (ticket.status === "in_progress") return "stage: working, no role recorded yet";
+  if (ticket.status === "completed") return "stage: done, no role recorded";
+  return "stage: queued";
 }
 
 function buildAriaLabel(

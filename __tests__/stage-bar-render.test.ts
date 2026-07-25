@@ -132,4 +132,27 @@ describe("#1468 stage-bar render — the operator-caught bug, at the render surf
     expect(aria).toMatch(/re-working/i);
     expect(aria).toContain("PLAN-REVIEW");
   });
+
+  it("GUARD 5 (#1901): a zero-ledger in_progress ticket lights NO pill — no glow, no current, no 'PLANNER active' aria", () => {
+    // The live-confirmed mislabel: tickets #1821/#1898 had ZERO ledger rows
+    // yet the pre-fix bar glowed PLANNER (the .find() fallback's array-first
+    // element), while the card list honestly said WORKING.
+    const t = ticket([]);
+    const markup = render(t);
+
+    expect(markup).not.toMatch(/ak-pipeline__step--glow/);
+    expect(markup).not.toMatch(/ak-pipeline__step--current/);
+    expect(markup).not.toMatch(/ak-pipeline__step--reworking/);
+
+    const ariaMatch = markup.match(/aria-label="([^"]*)"/);
+    const aria = ariaMatch ? ariaMatch[1] : "";
+    expect(aria).not.toMatch(/PLANNER active/i);
+    expect(aria).toMatch(/working, no role recorded yet/);
+
+    // All four role labels still render (the track shape is unchanged) — they
+    // are just all dim/pending.
+    for (const label of ["PLANNER", "PLAN-REVIEW", "EXECUTOR", "EXEC-REVIEW"]) {
+      expect(markup).toContain(label);
+    }
+  });
 });

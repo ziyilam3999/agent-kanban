@@ -139,3 +139,64 @@ describe("resolveStageBar — AC3 selector states", () => {
     }
   });
 });
+
+describe("#1901 — zero ledger evidence must claim NO active role", () => {
+  it("zero comments (in_progress): no pointer, noRoleEvidence, ALL pills pending — the pre-fix .find() landed on planner by array position", () => {
+    const s = resolveStageBar(ticket([]));
+
+    expect(s.pointer).toBeNull();
+    expect(s.noRoleEvidence).toBe(true);
+    expect(s.terminal).toBe(false);
+    expect(s.reworking).toBe(false);
+    for (const p of s.pills) {
+      expect(p.look).toBe("pending");
+      expect(p.reached).toBe(false);
+    }
+    expect(s.ariaLabel).toBe("stage: working, no role recorded yet");
+    expect(s.ariaLabel).not.toMatch(/PLANNER active/i);
+  });
+
+  it("non-pipeline comments (orchestrator/research) are NOT chain evidence — same generic state", () => {
+    const s = resolveStageBar(
+      ticket([
+        { role: "orchestrator", ts: at(1) },
+        { role: "research", ts: at(2) },
+      ]),
+    );
+    expect(s.pointer).toBeNull();
+    expect(s.noRoleEvidence).toBe(true);
+    expect(s.pills.every((p) => p.look === "pending")).toBe(true);
+  });
+
+  it("todo ticket with zero comments: honest 'queued' aria, still no pointer", () => {
+    const s = resolveStageBar(ticket([], "todo"));
+    expect(s.pointer).toBeNull();
+    expect(s.ariaLabel).toBe("stage: queued");
+  });
+
+  it("done ticket with zero comments (inline work, no chain): honest 'done, no role recorded' aria", () => {
+    const s = resolveStageBar(ticket([], "done"));
+    expect(s.pointer).toBeNull();
+    expect(s.ariaLabel).toBe("stage: done, no role recorded");
+  });
+
+  it("first real ledger row flips the state to evidence-based (planner row → planner done, pointer on plan-review per #1468 forward flow)", () => {
+    // A role COMMENT means the role has acted (#1468 semantics: AC3a), so the
+    // pointer advances to the first gap — what matters for #1901 is that the
+    // state is now EVIDENCE-based, no longer the generic no-claim state.
+    const s = resolveStageBar(ticket([{ role: "planner", ts: at(1) }]));
+    expect(s.noRoleEvidence).toBe(false);
+    expect(pillFor(s, "planner").look).toBe("done");
+    expect(s.pointer).toBe("plan-review");
+  });
+
+  it("single-role dispatch's one executor row is evidence — never the zero-evidence state", () => {
+    // #1821-shape END state: its only-ever ledger row is role executor.
+    const s = resolveStageBar(ticket([{ role: "executor", ts: at(1) }]));
+    expect(s.noRoleEvidence).toBe(false);
+    expect(pillFor(s, "executor").reached).toBe(true);
+    // NOTE: the forward-flow pointer for gapped chains (executor seen,
+    // planner not) is pre-existing #1468 semantics, deliberately not pinned
+    // here — see the PR body's "adjacent defect" note.
+  });
+});

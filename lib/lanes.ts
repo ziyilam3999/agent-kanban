@@ -16,15 +16,24 @@ export interface Lane {
   /** Ticket subject (already redacted upstream). */
   subject: string;
   /**
-   * Index into PIPELINE_ROLES of the lane's CURRENT stage. Non-bounced
-   * (unchanged pre-#1468 semantics): the highest-index pipeline role present
-   * in this ticket's comments — 0 (planner) when no pipeline role has been
-   * seen yet. Bounced (#1468): the index of the WORK role (planner/executor)
-   * the chain returned to after a fail-class review, derived from the SAME
-   * resolveStageBar() selector the drawer bar consumes — so the lane track and
-   * the drawer pill can never disagree about which role is genuinely active.
+   * Index into PIPELINE_ROLES of the lane's CURRENT stage, or NULL when the
+   * ticket carries no pipeline-role evidence at all (#1901). Non-bounced
+   * (pre-#1468 semantics): the highest-index pipeline role present in this
+   * ticket's comments. Bounced (#1468): the index of the WORK role
+   * (planner/executor) the chain returned to after a fail-class review,
+   * derived from the SAME resolveStageBar() selector the drawer bar consumes
+   * — so the lane track and the drawer pill can never disagree about which
+   * role is genuinely active.
+   *
+   * #1901 — NULL (was: silently 0 = planner) when ZERO pipeline-role comments
+   * exist: a zero-ledger ticket must not render "PLANNER active" from an
+   * array-index default. The swimlane track lights NO stage and shows the
+   * generic "▶ WORKING" chip instead (the same honest fallback the card
+   * list's phaseLine already used, which is why the two surfaces disagreed).
+   * A single-role dispatch (e.g. an executor-only ticket) lights its role
+   * only once its first ledger row lands — evidence, not guesswork.
    */
-  currentStageIndex: number;
+  currentStageIndex: number | null;
   /** The set of distinct roles seen on this ticket (drives done/pending tinting). */
   rolesSeen: Set<string>;
   /** True iff a fail-class review bounced the pointer back onto a prior work
@@ -76,7 +85,7 @@ export function deriveLanes(
     const rolesSeen = new Set(t.comments.map((c) => c.role));
     const stageBar = resolveStageBar(t);
 
-    let currentStageIndex: number;
+    let currentStageIndex: number | null;
     let reworking: boolean | undefined;
     let failedStage: number | undefined;
 
@@ -88,6 +97,14 @@ export function deriveLanes(
       if (stageBar.loopbackGap) {
         failedStage = PIPELINE_ROLES.indexOf(stageBar.loopbackGap[1]);
       }
+    } else if (stageBar.noRoleEvidence) {
+      // #1901: ZERO pipeline-role comments — claim NO stage. The old
+      // initializer (`currentStageIndex = 0`) survived the empty loop below
+      // and lit PLANNER as active with zero ledger evidence — a fabricated
+      // role claim for single-role dispatches (#1821/#1898 live-confirmed).
+      // Shares the drawer bar's noRoleEvidence signal so the two surfaces
+      // stay in lockstep (#1468 invariant).
+      currentStageIndex = null;
     } else {
       // No bounce: preserve the EXACT pre-#1468 semantics (highest reached
       // index) — non-regression for every non-fail fixture (AC5).

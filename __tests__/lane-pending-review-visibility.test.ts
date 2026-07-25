@@ -17,6 +17,12 @@
 // EXPLICIT agentIds + closedAt so the punch-in/punch-out discriminator (#1852
 // r3 per-agentId rule) is exercised for real, not via the agentId-less
 // back-compat path.
+//
+// RED→GREEN provenance: AC-1 was run RED first — with pendingReviewInFlight()
+// exported but the population filters still unwired, `active.has("ut")` failed
+// exactly as it does against the live pre-fix board (replayed 2026-07-25 on
+// real ledger data: pill=1, #1880's running reviewer invisible). The suite
+// went GREEN only once both filters consumed the predicate.
 
 import {
   buildTicket,

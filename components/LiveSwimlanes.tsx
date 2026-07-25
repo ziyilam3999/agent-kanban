@@ -21,10 +21,13 @@ interface LiveSwimlanesProps {
 /**
  * Live Swimlanes — one horizontal lane-row per live ticket, each showing its 4-role
  * track (planner → plan-review → executor → execution-review) with EXACTLY ONE stage
- * lit (`ak-lane-stage--live`) at the lane's current stage. Prior stages are
- * done-tinted, future stages dim. Purely presentational: no router hooks (so it stays
- * jest-renderable), no data fetching. Reuses the canonical role tokens so it never
- * disagrees with a card's pipeline pips.
+ * lit (`ak-lane-stage--live`) at the lane's current stage — EXCEPT a zero-evidence
+ * lane (#1901, `currentStageIndex === null`): NO stage is lit (all four dim) and the
+ * lane head carries the generic "▶ WORKING" chip instead, matching the card phase
+ * line's honest fallback for the same state. Prior stages are done-tinted, future
+ * stages dim. Purely presentational: no router hooks (so it stays jest-renderable),
+ * no data fetching. Reuses the canonical role tokens so it never disagrees with a
+ * card's pipeline pips.
  *
  * Forwards `ref` to the `.ak-lanes` section itself (#1456) — BoardView needs a
  * direct handle to the REVEALED element to `scrollIntoView` / measure its viewport
@@ -44,11 +47,21 @@ export const LiveSwimlanes = forwardRef<HTMLElement, LiveSwimlanesProps>(
             <div className="ak-lane-head">
               <span className="ak-lane-id">#{lane.id}</span>
               <span className="ak-lane-subject">{lane.subject}</span>
+              {lane.currentStageIndex === null && (
+                // #1901 — zero pipeline evidence: no stage may claim to be
+                // active, so the head says generically "working" (same
+                // vocabulary as the card phase line's fallback).
+                <span className="ak-lane-working">▶ WORKING</span>
+              )}
             </div>
 
             <ol
               className="ak-lane-track"
-              aria-label={`stage ${lane.currentStageIndex + 1} of ${PIPELINE_ROLES.length}`}
+              aria-label={
+                lane.currentStageIndex === null
+                  ? "working, no stage evidence yet"
+                  : `stage ${lane.currentStageIndex + 1} of ${PIPELINE_ROLES.length}`
+              }
             >
               {PIPELINE_ROLES.map((role, idx) => {
                 // #1468: a failed review's OWN stage renders red-tinted
@@ -58,14 +71,19 @@ export const LiveSwimlanes = forwardRef<HTMLElement, LiveSwimlanesProps>(
                 // read the failed review as "pending" — this check takes
                 // precedence and is a no-op on every non-bounced lane, since
                 // `failedStage` is undefined there).
+                // #1901: a null currentStageIndex (zero pipeline evidence)
+                // lights NOTHING — every stage renders dim/pending; the
+                // explicit null branch avoids `idx < null` coercion traps.
                 const state =
                   lane.failedStage === idx
                     ? "failed"
-                    : idx < lane.currentStageIndex
-                      ? "done"
-                      : idx === lane.currentStageIndex
-                        ? "live"
-                        : "pending";
+                    : lane.currentStageIndex === null
+                      ? "pending"
+                      : idx < lane.currentStageIndex
+                        ? "done"
+                        : idx === lane.currentStageIndex
+                          ? "live"
+                          : "pending";
                 const isLive = state === "live";
                 const hue = roleColor(role);
 

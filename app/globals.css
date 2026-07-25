@@ -763,6 +763,19 @@ button {
   min-width: 0;
 }
 
+/* #1901 — zero-evidence lane: no stage in the track is lit (the board must
+   never claim a specific role with no ledger evidence), so the lane head
+   carries the same generic "▶ WORKING" the card phase line uses for this
+   state. Mint = the board's single "live" hue. */
+.ak-lane-working {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--live);
+  white-space: nowrap;
+}
+
 .ak-lane-track {
   display: flex;
   align-items: stretch;

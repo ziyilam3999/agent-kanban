@@ -71,10 +71,13 @@ describe("deriveLanes — pure selector", () => {
     expect(byId["4"]).toBe(3);
   });
 
-  it("AC#3: no pipeline role seen → planner-pending (index 0)", () => {
+  it("AC#3 (#1901 flip): no pipeline role seen → NO stage claimed (null), never planner-by-default", () => {
+    // Pre-#1901 this asserted index 0 (planner) — the exact mislabel the
+    // operator live-confirmed on #1821/#1898: an array-index default is not
+    // evidence that the planner is running.
     const t = ticket("1", "in_progress", [c("orchestrator")]);
     const [lane] = deriveLanes([t], new Set(["1"]));
-    expect(lane.currentStageIndex).toBe(0);
+    expect(lane.currentStageIndex).toBeNull();
     // Highest index wins even when out-of-order / interleaved with free-form roles.
     const t2 = ticket("2", "in_progress", [
       c("executor"),
@@ -154,6 +157,48 @@ describe("deriveLanes — pure selector", () => {
       expect(lane.currentStageIndex).toBe(2);
       expect(lane.reworking).toBeUndefined();
       expect(lane.failedStage).toBeUndefined();
+    });
+  });
+
+  describe("#1901: zero-ledger tickets must not claim PLANNER active", () => {
+    // FINDING (documented, not worked around): the Ticket schema carries NO
+    // dispatch-shape metadata, so case (a) — a zero-ledger ticket that IS a
+    // genuine 4-role pipeline about to start — and case (b) — a zero-ledger
+    // single-role dispatch that will NEVER produce a planner row (the #1821
+    // pattern: one executor-role self-append is its whole lifecycle) — are
+    // byte-identical on the board (comments: []). The board therefore renders
+    // the SAFER generic state for BOTH: no stage lit (null), the swimlane
+    // shows the same "WORKING" fallback the card list's phaseLine already
+    // used. If dispatch-shape metadata is ever plumbed through the exporter,
+    // case (a) may reasonably light planner as "up next" — today it cannot be
+    // told apart, so it must not guess.
+
+    it("(b) #1821-shape: zero-ledger in_progress single-role dispatch → null (no PLANNER claim)", () => {
+      const t = ticket("1821", "in_progress", []);
+      const [lane] = deriveLanes([t], new Set(["1821"]));
+      expect(lane.currentStageIndex).toBeNull();
+      expect(lane.reworking).toBeUndefined();
+      expect(lane.failedStage).toBeUndefined();
+    });
+
+    it("(a) zero-ledger in_progress genuine 4-role pipeline → ALSO null (indistinguishable from (b) today — safer generic wins)", () => {
+      // Identical data to (b) by construction; kept as its own fixture so the
+      // day a dispatch-shape signal lands, THIS is the test to update.
+      const t = ticket("1898", "in_progress", []);
+      const [lane] = deriveLanes([t], new Set(["1898"]));
+      expect(lane.currentStageIndex).toBeNull();
+    });
+
+    it("single-role ticket lights its role from EVIDENCE once the first ledger row lands (executor-only → EXECUTOR)", () => {
+      const t = ticket("1821", "in_progress", [c("executor")]);
+      const [lane] = deriveLanes([t], new Set(["1821"]));
+      expect(lane.currentStageIndex).toBe(2);
+    });
+
+    it("4-role pipeline lights PLANNER only once the planner row actually lands", () => {
+      const t = ticket("1898", "in_progress", [c("planner")]);
+      const [lane] = deriveLanes([t], new Set(["1898"]));
+      expect(lane.currentStageIndex).toBe(0);
     });
   });
 });

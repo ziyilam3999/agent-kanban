@@ -5,7 +5,7 @@ import type { Lane } from "@/lib/lanes";
 
 const lane = (
   id: string,
-  currentStageIndex: number,
+  currentStageIndex: number | null,
   rolesSeen: string[] = [],
   reworking?: boolean,
   failedStage?: number,
@@ -72,6 +72,37 @@ describe("LiveSwimlanes render", () => {
     // The static lit stage is still present under reduced motion.
     expect(reduced).toContain("ak-lane-stage--live");
     expect(reduced).toContain("EXECUTOR");
+  });
+
+  describe("#1901: zero-evidence lane (currentStageIndex null) — no stage lit, generic WORKING chip", () => {
+    it("null lane: ZERO ak-lane-stage--live, all four stages pending, no aria-current", () => {
+      const markup = render([lane("1821", null)]);
+      expect(count(markup, "ak-lane-stage--live")).toBe(0);
+      expect(count(markup, "ak-lane-stage--pending")).toBe(4);
+      expect(count(markup, "ak-lane-stage--done")).toBe(0);
+      expect(markup).not.toContain('aria-current');
+    });
+
+    it("null lane: head carries the generic ▶ WORKING chip (phaseLine vocabulary), track aria-label is honest", () => {
+      const markup = render([lane("1821", null)]);
+      expect(markup).toContain("ak-lane-working");
+      expect(markup).toContain("▶ WORKING");
+      expect(markup).toContain("working, no stage evidence yet");
+      expect(markup).not.toContain("stage 1 of 4");
+    });
+
+    it("evidence-based lane does NOT render the WORKING chip (index 0 = planner genuinely lit from a real row)", () => {
+      const markup = render([lane("1898", 0)]);
+      expect(markup).not.toContain("ak-lane-working");
+      expect(count(markup, "ak-lane-stage--live")).toBe(1);
+      expect(markup).toContain("stage 1 of 4");
+    });
+
+    it("mixed panel: one null lane + one evidence lane → exactly one lit stage total, one WORKING chip", () => {
+      const markup = render([lane("1821", null), lane("other", 2)]);
+      expect(count(markup, "ak-lane-stage--live")).toBe(1);
+      expect(count(markup, "ak-lane-working")).toBe(1);
+    });
   });
 
   describe("#1468 AC5: bounced lane — EXECUTOR not lit, PLANNER lit, plan-review --err-tinted", () => {

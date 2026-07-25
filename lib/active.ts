@@ -200,6 +200,42 @@ function pipelineHasOpenPunchIn(t: Ticket): boolean {
 }
 
 /**
+ * #1867 — TRUE iff a ticket is parked in the REVIEW column by a PENDING
+ * (unresolved) execution-review while its chain still carries a genuinely-open
+ * pipeline punch-in — i.e. the reviewer agent is (as far as the ledger can
+ * tell) STILL RUNNING.
+ *
+ * THE GAP THIS CLOSES (live-confirmed 2026-07-25 on real board data): the
+ * moment an execution-review ledger row lands, toColumn() (build-board.ts)
+ * moves an in_progress task to the `in_review` column — but the lane
+ * population in computeActiveIds below (and deriveLanes, which must match) was
+ * `in_progress ∪ shippingAfterPass`, and shippingAfterPass requires a
+ * RESOLVED non-fail verdict. A pending review satisfies neither, so for the
+ * entire review leg the ticket was excluded and the genuinely-running
+ * reviewer was invisible to the "N LANES LIVE" pill — a FALSE NEGATIVE, the
+ * mirror image of the #1852 false positives.
+ *
+ * Deliberately narrow: everything hard is delegated to chainInFlight, so all
+ * of #1852's punch-out semantics apply unchanged — a reviewer that crashed /
+ * was killed / closed without a verdict (`closedAt` stamped, verdict absent)
+ * is punched OUT ⇒ this returns false and the dead chain stays dark. A
+ * resolved verdict also returns false here: fail-class puts the column back
+ * in in_progress (never in_review), and non-fail is the existing
+ * shippingAfterPass disjunct's territory (with #1791's fresh-round exception
+ * flowing through chainInFlight either way). The 6h INFLIGHT_LANE_CAP_MS and
+ * the #1816 held-ticket exclusion are applied by the caller exactly as for
+ * every other in-flight chain.
+ */
+export function pendingReviewInFlight(t: Ticket): boolean {
+  return (
+    t.column === "in_review" &&
+    t.status === "in_progress" &&
+    !shippingAfterPass(t) &&
+    chainInFlight(t)
+  );
+}
+
+/**
  * #1852 r3 AC-8 — TRUE iff the ticket carries >=1 comment from a PIPELINE
  * role (planner / plan-review / executor / execution-review), regardless of
  * punch-out state. This is the "does this ticket have a 3-role chain history
@@ -282,8 +318,19 @@ export function computeActiveIds(
   // returned set) — so a held card never breathes (no ak-card--active / no
   // ak-phase--live) and never inflates the live-lane count, with zero extra
   // plumbing beyond this one filter clause.
+  // #1867 — pendingReviewInFlight is the third population disjunct: a ticket
+  // whose PENDING execution-review parked it in the REVIEW column while the
+  // reviewer is still punched-IN. It reaches the in-flight disjunct below via
+  // chainInFlight (which it already satisfies by construction), bounded by the
+  // same 6h cap; it may also become the focus when it is the newest-updated
+  // member — correct, since a running review IS the session's current work.
+  // deriveLanes' population filter MUST stay matched with this one.
   const inProgress = tickets.filter(
-    (t) => (t.column === "in_progress" || shippingAfterPass(t)) && !isHeld(t)
+    (t) =>
+      (t.column === "in_progress" ||
+        shippingAfterPass(t) ||
+        pendingReviewInFlight(t)) &&
+      !isHeld(t)
   );
   if (inProgress.length === 0) return active;
 

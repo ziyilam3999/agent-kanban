@@ -6,6 +6,7 @@
 
 import type { Ticket } from "./board-schema";
 import { PIPELINE_ROLES, shippingAfterPass } from "./ui-meta";
+import { pendingReviewInFlight } from "./active";
 import { resolveStageBar } from "./stage-bar";
 
 /** One live ticket's lane descriptor for the swimlanes view. */
@@ -61,9 +62,15 @@ export function deriveLanes(
   const lanes: Array<Lane & { updatedAt: number }> = [];
 
   for (const t of tickets) {
-    // Lane population (#1410): in_progress OR passed-and-shipping — must match
-    // computeActiveIds' filter. Revisit if a future Column value is added.
-    if (t.column !== "in_progress" && !shippingAfterPass(t)) continue;
+    // Lane population (#1410, #1867): in_progress OR passed-and-shipping OR
+    // pending-review-in-flight — must match computeActiveIds' filter. Revisit
+    // if a future Column value is added.
+    if (
+      t.column !== "in_progress" &&
+      !shippingAfterPass(t) &&
+      !pendingReviewInFlight(t)
+    )
+      continue;
     if (!activeIds.has(t.id)) continue;
 
     const rolesSeen = new Set(t.comments.map((c) => c.role));

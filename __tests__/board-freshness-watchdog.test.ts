@@ -280,6 +280,102 @@ describe("watchdog CLI --check (observable, fires + mutates nothing)", () => {
   );
 });
 
+// ---------------------------------------------------------------------------
+// Sync-log FOLD semantics (the 2026-07-25/26 28h blind spot): the fold may only
+// count SUCCESS records (`uploaded` / `skipped-unchanged`) as freshness. A
+// firing-but-FAILING pipeline (the hook appending `export-failed` lines every
+// task change while the courier toolchain is dead) advances the log's tail
+// timestamp WITHOUT delivering a board — folding those timestamps manufactures
+// perpetual FRESH during exactly the outage this watchdog exists to catch.
+// Both ends: failure-tail must NOT rescue (RED on the any-record fold), and a
+// success-tail MUST still rescue (guards against over-tightening to no-fold).
+// ---------------------------------------------------------------------------
+describe("watchdog CLI --check sync-log fold (success-only rescue)", () => {
+  /** One hook-shaped failure line (exactly what on-task-change.sh writes). */
+  const failLine = (iso: string): string =>
+    JSON.stringify({
+      ts: iso,
+      result: "failed",
+      reason: "export-failed",
+      url: null,
+      boardBytes: null,
+      boardMtime: null,
+    }) + "\n";
+
+  /** One courier success line. */
+  const successLine = (iso: string, result: string): string =>
+    JSON.stringify({
+      ts: iso,
+      result,
+      reason: "unchanged",
+      url: null,
+      boardBytes: 1_000_000,
+      boardMtime: iso,
+      hash: "ab".repeat(32),
+    }) + "\n";
+
+  const isoAgo = (msAgo: number): string =>
+    new Date(Date.now() - msAgo).toISOString();
+
+  darwinIt(
+    "RED-on-blind-fold: stale board + active work + sync.log tail of FRESH failure records ⇒ STALE-ACTIVE (failure ts must never count as freshness)",
+    () => {
+      const sb = makeSandbox();
+      setMtime(sb.boardPath, N + 5 * 60_000); // board 15 min old → stale
+      setMtime(sb.ledgerFile, 20_000); // work active 20s ago
+      const syncLog = path.join(sb.dir, "sync.log");
+      // Old success (same age as the board), then a fresh failing-hook tail —
+      // the exact on-disk shape of the 2026-07-25/26 outage.
+      fs.writeFileSync(
+        syncLog,
+        successLine(isoAgo(N + 5 * 60_000), "uploaded") +
+          failLine(isoAgo(90_000)) +
+          failLine(isoAgo(60_000)) +
+          failLine(isoAgo(10_000))
+      );
+      const r = spawnSync(TSX_BIN, [CLI, "--check"], {
+        cwd: REPO_ROOT,
+        env: {
+          ...cliEnv(sb),
+          SYNC_LOG: syncLog,
+          BOARD_WATCHDOG_FOLD_SYNCLOG: "1",
+        },
+        encoding: "utf8",
+      });
+      expect(r.status).toBe(0);
+      expect((r.stdout || "").trim()).toBe("STALE-ACTIVE");
+    },
+    30000
+  );
+
+  darwinIt(
+    "fold still rescues on SUCCESS: stale board mtime + a fresh skipped-unchanged record ⇒ FRESH (the designed anti-double-alert rescue survives)",
+    () => {
+      const sb = makeSandbox();
+      setMtime(sb.boardPath, N + 5 * 60_000); // board file 15 min old
+      setMtime(sb.ledgerFile, 20_000); // work active
+      const syncLog = path.join(sb.dir, "sync.log");
+      fs.writeFileSync(
+        syncLog,
+        successLine(isoAgo(N + 5 * 60_000), "uploaded") +
+          successLine(isoAgo(30_000), "skipped-unchanged") // courier confirmed remote 30s ago
+      );
+      const r = spawnSync(TSX_BIN, [CLI, "--check"], {
+        cwd: REPO_ROOT,
+        env: {
+          ...cliEnv(sb),
+          SYNC_LOG: syncLog,
+          BOARD_WATCHDOG_FOLD_SYNCLOG: "1",
+        },
+        encoding: "utf8",
+      });
+      expect(r.status).toBe(0);
+      expect((r.stdout || "").trim()).toBe("FRESH");
+    },
+    30000
+  );
+});
+
 describe("installer --dry-run (valid plist, mutates neither LaunchAgents nor launchctl)", () => {
   darwinIt(
     "prints a plutil-valid plist referencing the watchdog; no plist file + no launchctl entry created",

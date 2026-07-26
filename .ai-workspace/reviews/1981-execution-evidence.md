@@ -18,7 +18,9 @@ Needle-class pipeline: `git grep -hoE '[A-Za-z0-9-]+\.public\.blob\.vercel-stora
 - Positive control (same-shape, per N3 — the `origin/master` baseline itself is the
   same-invocation-shape power proof, recorded above as `1`). Secondary scratch-dir
   control also run: `git grep --no-index` over a scratch directory containing one seeded
-  synthetic real-shaped host (`fakestore0000.public.blob.vercel-storage.com`) printed `1`.
+  synthetic real-shaped host (subdomain `fakestore0000` + the class suffix
+  `.public.blob.vercel-storage.com`, deliberately split here so this doc doesn't
+  re-trip its own AC-1 needle-class scan — see the Traps section below) printed `1`.
 - Full needle-class extraction on the finished tip (`git grep -noE '...' -- .`) shows
   exactly the two expected `example.` occurrences and nothing else:
   ```
@@ -49,12 +51,13 @@ script and executed locally — not read, run.
 
 **(a) RED.** A throwaway worktree (`git worktree add <scratch> -b
 1981-red-test-throwaway2 HEAD`, off the finished branch's committed tip) had ONE file
-(`README.md`) seeded with a synthetic real-shaped host
-(`fakestore0000.public.blob.vercel-storage.com`) and `git add`-ed (tracked-by-that-copy).
-Running the exact check block there:
+(`README.md`) seeded with a synthetic real-shaped host (subdomain `fakestore0000` + the
+class suffix `.public.blob.vercel-storage.com`, split here for the same self-scan reason
+as above) and `git add`-ed (tracked-by-that-copy). Running the exact check block there:
 ```
 privacy home-path check OK: rc=1 (no home paths in tracked non-test files).
-fakestore0000.public.blob.vercel-storage.com
+<one line: the seeded subdomain + class-suffix, elided from this transcript so the
+ verbatim reproduction doesn't itself re-trip AC-1 on this doc>
 ERROR (blob-host): forbidden content is committed.
 rc=1
 ```
@@ -151,6 +154,19 @@ smuggled in. All five hold independently on this branch tip.
 - New check does not self-match its own pattern definition in `ci.yml` (N6): verified
   `git grep -hoE '...' -- .github/workflows/ci.yml | command grep -Ev '^example\.' | wc -l`
   → `0`. No `ci.yml` exclusion was added to the new check (per N6's recommendation).
+- **The cure is not exempt from the disease (self-caught mid-write).** A first draft of
+  this very doc quoted the RED-test's synthetic seed as one contiguous string
+  (`fakestore0000` immediately followed by `.public.blob.vercel-storage.com`) three
+  times. Because AC-1's needle class is deliberately shape-blind — it cannot and must not
+  try to distinguish "real leak" from "synthetic real-shaped fixture" — that draft made
+  AC-1 print `3` instead of `0` on the committed tip once this file was force-added. Caught
+  by re-running the full AC-1/AC-3 verification suite AFTER committing this file (not
+  just after committing the redaction+guard commit), per the "scan the FINAL tree" trap
+  above applied recursively to the evidence artifact itself. Fixed by splitting the
+  subdomain and class-suffix across separate inline-code spans everywhere in this doc (see
+  AC-1 and AC-3(a) above) — same technique the plan's own header already uses for the real
+  hostname. Final re-verification after the fix: AC-1 on the committed tip prints `0` (see
+  the executor's final report for the exact re-run).
 
 ## Out of scope (untouched, confirmed)
 

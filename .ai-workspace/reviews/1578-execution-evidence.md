@@ -252,7 +252,7 @@ Fetched the live board from the real production blob URL (the newest
 written by the operator's own installed hook — NOT by any test in this PR):
 
 ```
-$ curl -sS https://tj7p6b4mu3ckuyc5.public.blob.vercel-storage.com/board.json -o /tmp/1578-live-board-check.json
+$ curl -sS https://example.public.blob.vercel-storage.com/board.json -o /tmp/1578-live-board-check.json
 fetched: 669140 bytes
 
 $ node -e '... tickets.length ...'
@@ -263,6 +263,14 @@ $ command grep -Ec '"id": ?"9999"' /tmp/1578-live-board-check.json
 $ command grep -Ec '"id": ?"9999"' <positive-control-incident-fixture>
 1
 ```
+
+**[REDACTED 2026-07-26, #1981]:** the `curl` line above originally showed the real
+production blob-store hostname in place of the `example.` placeholder now shown. It has
+been replaced with the repo's canonical fake-host convention (same one used by
+`__tests__/load-board.test.ts`) because this file is tracked and this repo is public. The
+original AC-7 fetch **did** run against the real production store at the time this
+evidence was written — this redaction only scrubs the hostname from the tracked text; it
+does not change what was tested or retract the 382-ticket / no-`id:"9999"` finding above.
 
 382 ≥ 50, no id `9999` present, and the positive control (the incident's own
 fixture shape) correctly trips the same grep — proving the check has power.

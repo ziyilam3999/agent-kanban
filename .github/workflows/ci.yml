@@ -89,6 +89,36 @@ jobs:
             git grep -nIE '(/Users/|/home/|[A-Za-z]:[\\/]Users[\\/])[A-Za-z0-9._-]+/' -- . ':(exclude)*.example' ':(exclude).github/workflows/ci.yml' ':(exclude)__tests__/*'
           echo "privacy home-path check OK: rc=1 (no home paths in tracked non-test files)."
 
+          # Real blob-store hostname class (#1981): the board's private data lives behind
+          # a <subdomain>.public.blob.vercel-storage.com URL that is this system's ONLY
+          # confidentiality mechanism (public repo, private data). The repo's established
+          # placeholder convention is the literal `example` subdomain (see
+          # __tests__/load-board.test.ts) — that fixture is intentionally exempt, every
+          # other subdomain of this host class is a real leaked address and must fail the
+          # build. No path exclusion here (incl. this file): a real host pasted into any
+          # tracked file, including this workflow, must be caught — see #1981 plan N6.
+          blob_host_check() {
+            local matches rc
+            matches="$(git grep -hoE '[A-Za-z0-9-]+\.public\.blob\.vercel-storage\.com' -- . 2>&1)"
+            rc=$?
+            if [ "$rc" -ge 2 ]; then
+              echo "$matches" >&2
+              return 2
+            fi
+            if [ "$rc" -eq 1 ]; then
+              return 1  # no host of this class anywhere in the tree -- clean
+            fi
+            local real
+            real="$(printf '%s\n' "$matches" | command grep -Ev '^example\.' || true)"
+            if [ -n "$real" ]; then
+              echo "$real"
+              return 0
+            fi
+            return 1  # only the example. placeholder is present -- clean
+          }
+          fail_closed_grep "blob-host" blob_host_check
+          echo "privacy blob-host check OK: rc=1 (no real blob-storage hostname tracked; example. placeholder tolerated)."
+
           # Flag ANY tracked board snapshot/backup under data/ except the synthetic sample.
           # The git producer is captured STANDALONE (not piped into grep) so a fatal git error
           # fails this step loudly instead of being masked by pipefail + a downstream grep's

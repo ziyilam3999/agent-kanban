@@ -303,3 +303,222 @@ and externally checkable. Cleared for execution.
 
 cairn: searched "privacy", "blob", "blob url" via `node skills/cairn/bin/cairn-find.mjs`.
 Matched (quoted verbatim): `[T2] hive-mind-persist/session-notes/2026-06-19-1289988459.md:9 - lesson | **#1051** | Rotate the Vercel Blob read-write token | Token rotation requires ...` — confirming rotation is separately tracked (out of scope here); also `[T1] 2026-07-20 ...: privacy-scan.sh has TWO independently vacuous invocation shapes, both exit 0 CLE...` — why every AC above pairs its scan with a positive control.
+
+---
+
+## Review — execution-review
+
+**Decision: PASS** (execution-review, `3ROLE_TASK:1981`, 2026-07-27). Independent stateless
+review of PR #68 at head `d7292cf`. I did NOT author this plan, did NOT write this code, and
+did NOT merge anything. Every AC below was **re-derived by running it myself** against the
+PR's actual head commit — the executor's self-report was treated as a hypothesis, not
+evidence. Like the plan and the plan-review, this section never quotes the real store
+hostname, and never writes any subdomain contiguously against the class suffix (so this
+artifact cannot trip the very guard it is reviewing).
+
+Subject: PR #68 → `master`, head `d7292cf`, 3 commits on top of `origin/master` (`7c40595`).
+Verification worktrees: detached checkouts of `d7292cf` and `origin/master`, plus a
+throwaway seeded copy for the RED probes (all quarantined after the run; nothing pushed).
+
+### AC-by-AC re-derivation (measured, not read)
+
+- **AC-1 — PASS.** Needle-class pipeline run by me in both trees:
+  - `origin/master`: prints **`1`** — the single known leak at
+    `.ai-workspace/reviews/1578-execution-evidence.md:255`. This is the same-shape positive
+    control per N3: the oracle demonstrably *can* say YES for this needle in this exact
+    invocation shape.
+  - `d7292cf` (tip): prints **`0`**. Genuine delta, independently reproduced.
+  - Full class extraction on the tip returns 5 occurrences, **all** with subdomain `example`
+    (plan file ×1, 1578 evidence ×1, 1981 evidence ×2, `__tests__/load-board.test.ts` ×1).
+  - Direct existence check on the real subdomain itself: **absent** from `d7292cf`'s tree,
+    **present** on `origin/master` — an independent, needle-specific control confirming the
+    scan is not vacuous.
+- **AC-2 — PASS.** All four sub-checks re-run on the tip for the 1578 evidence file:
+  (a) `git ls-files --error-unmatch` → rc **0**; (b) `AC-7` count → **3** (≥1);
+  (c) `example.`-host count → **1** (≥1); (d) `redact` count (-i) → **2** (≥1). Matches the
+  executor's figures exactly. Read the redacted region directly: the `curl` line now carries
+  the canonical placeholder and the `[REDACTED 2026-07-26, #1981]` note preserves the
+  evidentiary narrative (states the original fetch DID hit the real store, and that the
+  382-ticket / no-`id:"9999"` finding is not retracted). Evidence preserved, not shredded.
+- **AC-3 — PASS, and the guard is materially stronger than claimed.** I extracted the
+  **exact shipped block** (`ci.yml` lines 63–120, dedented verbatim — not retyped) into a
+  standalone script and executed it. Six probes:
+  | # | Probe | Expected | Measured |
+  |---|---|---|---|
+  | GREEN | clean tip, `example.` fixture present | rc 0 | **rc 0** + `blob-host check OK` |
+  | RED-1 | synthetic host seeded into tracked `README.md` | fail | **rc 1**, `ERROR (blob-host)` |
+  | RED-2 | synthetic host seeded into **`ci.yml` itself** | fail | **rc 1**, `ERROR (blob-host)` |
+  | RED-3 | synthetic host seeded into `__tests__/` | fail | **rc 1**, `ERROR (blob-host)` |
+  | RED-4 | lookalike subdomain `exampleXYZ` | fail | **rc 1**, `ERROR (blob-host)` |
+  | FAIL-CLOSED | block run where `git grep` cannot run | fail | **rc 1**, `check failed to RUN (rc=2) — failing closed` |
+
+  RED-2 is the probe the review brief specifically asked for: **the new check adds no path
+  exclusion at all** (not even for `ci.yml`), so a real host pasted into the workflow *is*
+  caught. It does not pass trivially by self-exclusion — plan-review N6's recommendation was
+  followed, and the executor documented the choice in an inline comment. RED-3 confirms the
+  blob check deliberately does **not** inherit the home-path check's `__tests__/*` exemption.
+  RED-4 confirms the `^example\.` filter is anchored and dot-terminated, so a lookalike
+  cannot borrow the exemption. Crucially, **every RED probe fired while the legitimate
+  `example.` fixture was still present** — the exemption cannot mask a sibling real host.
+  The known repo failure class (broken `:(exclude)` pathspec + error-swallowing wrapper) is
+  structurally absent here: there are no exclude pathspecs to break, and the rc≥2 fail-closed
+  arm was proven to fire. AC-3(c): the branch adds exactly two files (the plan + the 1981
+  evidence doc) — no seeded control file, and no seed branch exists on `origin`.
+- **AC-4 — PASS.** `gh pr checks 68`: `privacy` SUCCESS, `build (ubuntu-latest, 20)` SUCCESS,
+  `build (windows-latest, 20)` SUCCESS, `Vercel` SUCCESS. Run `30209746066` confirmed at
+  `headSha=d7292cf`, `event=pull_request`, `conclusion=success`. I went further than the AC
+  and pulled the **runtime log line** out of the privacy job to prove the new check actually
+  *executed on the runner* rather than being skipped:
+  `2026-07-26T16:08:59.0892524Z privacy blob-host check OK: rc=1 (no real blob-storage hostname tracked; example. placeholder tolerated).`
+  That line is only reachable if `blob_host_check` ran and returned 1 — and an rc of 1 rather
+  than a usage error also proves `git grep -hoE`'s flags parsed on ubuntu-24.04.
+- **AC-5 — PASS.** `git merge-base --is-ancestor origin/master d7292cf` → rc **0**;
+  `git rev-list origin/master ^d7292cf` → **0** commits (nothing on master was rewritten or
+  dropped). The branch is 3 ordinary commits. Grepped every added line of the diff for
+  blob/Vercel mutation verbs (`vercel blob|env`, `blob put/del/upload/copy`, `@vercel/blob`,
+  `BLOB_READ_WRITE_TOKEN`, `curl -X PUT|POST|DELETE`) → **no matches**. No production-side
+  action was smuggled in.
+
+### The two operator-only exclusions are deliberate, not dropped
+
+Verified by reading the plan at the shipped revision. Git-history purge and Vercel URL/token
+rotation are each named **twice** — in `## Out of scope / needs operator sign-off` (with
+reasons: "hard to reverse", "production-affecting; operator-only") and again in
+`## Deferred-follow-ups:` with disposition pointers (rotation → #1051 runbook; history purge →
+the operator ask attached to #1981). The plan also states the honest limitation in-line: *"this
+fix stops the bleeding but does not un-leak the address."* Neither was folded into an AC nor
+silently dropped, and AC-5 mechanically guards against either being smuggled back in.
+
+### Force-added artifacts — independently re-scanned as shipped
+
+Per `docs/privacy-scan-invocation-contract.md` — `--working` named explicitly, never
+`--staged <path>`. Scanned at the PR tip (`d7292cf`), not the executor's pre-add working state:
+
+| Path scanned (at `d7292cf`) | Scanner's own verdict line | exit |
+|---|---|---|
+| `.ai-workspace/plans/2026-07-26-1981-privacy-blob-url-scrub.md` | `privacy-scan: CLEAN mode=working size=21317` | 0 |
+| `.ai-workspace/reviews/1981-execution-evidence.md` | `privacy-scan: CLEAN mode=working size=10818` | 0 |
+| `.ai-workspace/reviews/1578-execution-evidence.md` | `privacy-scan: CLEAN mode=working size=13874` | 0 |
+| `.github/workflows/ci.yml` | `privacy-scan: DIRTY (home-path matches=1, brand matches=0, email matches=0)` | 1 |
+
+Non-zero `size=` on every CLEAN, so none is a scan of nothing. **Positive control** (identical
+invocation shape, scratch copies of both force-added files with a seeded home-path needle):
+`privacy-scan: DIRTY (home-path matches=1, brand matches=0, email matches=0)` (exit 1) for
+both — the instrument had power against these exact artifacts.
+
+The `ci.yml` DIRTY is **pre-existing and not introduced by this PR**: `origin/master`'s
+`ci.yml` returns the byte-identical verdict, the single match is the fictional home-path
+illustration (a made-up `alice` user) in the explanatory comment at `ci.yml:81` — unchanged
+by this diff — and the PR's `ci.yml` hunk adds no home path. The repo's own CI home-path
+check excludes `ci.yml` for exactly this reason. Not a finding against #1981.
+
+*(Self-note, recorded because it is the plan's own "the cure is not exempt from the disease"
+trap firing on the reviewer: my first draft of this paragraph quoted that fictional path
+**literally**, which made this tracked plan file trip the repo's home-path privacy check —
+the shipped guard block returned `ERROR (home-path)` on my own text. Caught by running the
+shipped guard over the worktree **after** writing this review, not before. Rewritten to
+describe the placeholder instead of reproducing it; re-verified clean below. Same failure
+mode the executor self-caught in F1, same fix shape — evidence the trap is real and that
+post-write re-verification is the control that catches it.)*
+
+Extra, because the canonical scanner does not cover this ticket's class: a direct needle-class
+extract over both force-added files returns only `example.` subdomains. And the **PR body and
+all three commit messages** are clean of the real subdomain (count **0**, with a positive
+control on the same file and shape returning **1**) — the "cure is not exempt from the
+disease" rule holds on the public surfaces too. The PR body's only host-class mention is the
+generic `<subdomain>.` form.
+
+### Monotonicity checklist (#1590)
+
+- **`example.` exemption (mutual-exclusion arm).** Stronger = "a real-shaped host is
+  present"; weaker = "it's the placeholder". The filter operates per-line on `-o`-extracted
+  matches, where each line is exactly one host, so an `example.` line can only remove
+  *itself*. **Proven by execution, not argument**: RED-1/2/3/4 all fired with the legitimate
+  `example.` fixture still in the tree. The weaker claim cannot erase the stronger. OK
+- **Check ordering under `set -euo pipefail` (last-writer-wins arm).** Stronger = "violation
+  found" → `exit 1` terminates the step immediately; a later passing check never runs and so
+  cannot overwrite it. Demonstrated in the fail-closed probe: the home-path check exited
+  first and the blob check never executed. OK
+- **`2>&1` capture arm.** stderr merged into `matches` biases toward the *stronger* claim
+  (noise survives the `^example\.` filter → FAIL). No path where noise erases a finding. OK
+- **AC-3(c) vs AC-1 (per plan-review N4).** AC-1 on the tip is the stronger claim. I did not
+  rely on AC-3(c): I ran AC-1's needle class against **each of the three commit trees**
+  individually — strictly stronger than `--diff-filter=A` — and that is what surfaced F1
+  below. A passing AC-3(c) did not, and could not, erase it. OK
+- **One residual asymmetry — F4 below.** `real="$(... | command grep -Ev '^example\.' || true)"`
+  collapses a hypothetical `grep` rc≥2 into the *clean* path. Everywhere else in this block
+  the author fails closed on rc≥2; this is the single exception, so the weaker claim ("no
+  real host") could in principle erase the stronger ("the filter could not run"). Exposure is
+  theoretical — the producer is a static in-memory string via `printf`, not a live process.
+  Non-blocking; noted for hardening.
+
+No arm in this diff lets a weaker claim overwrite a stronger one in practice.
+
+### Findings (all NON-BLOCKING; none breaks a Binary AC)
+
+- **F1 — an intermediate pushed commit carries 3 SYNTHETIC real-shaped hosts.** Running AC-1
+  per-commit: `b35f550` → **0**, `ade79e2` → **3**, `d7292cf` → **0**. The three hits in
+  `ade79e2` are the RED-test seed (subdomain `fakestore0000`, joined to the class suffix) in
+  the executor's own draft evidence doc — this is the bug the executor self-caught and fixed
+  in `d7292cf`, and their account of it checks out exactly. **It is NOT the real production
+  host**: I verified the real subdomain is absent from `ade79e2`'s tree (and present on
+  `origin/master`, so the check had power). No privacy impact — the seed is fictional. But
+  `ade79e2` is reachable from the pushed public branch, so those bytes are on the remote.
+  CI never ran on `ade79e2` (only one run exists, on `d7292cf`), so the guard did not catch
+  this — the executor's own post-commit re-verification did. **Recommendation: squash-merge**
+  (the repo's convention anyway) so `ade79e2`'s tree never enters `master`'s history.
+- **F2 — the executor's "5 pre-existing test failures" claim does not reproduce.** Their
+  evidence file states `npm test` yields 405/410 with 5 failures in
+  `__tests__/board-freshness-watchdog.test.ts`, reproducing on unmodified `origin/master`.
+  Measured: the full suite on `d7292cf` is **42/42 suites, 410/410 tests passing**, and the
+  watchdog suite alone is **16/16 passing** on a clean `origin/master` worktree. The claim
+  over-reports a problem that does not exist (likely transient local state or a wall-clock
+  sensitivity at their run time). It cannot be caused by this PR regardless: the diff has
+  **zero** source/test delta — `git diff origin/master..d7292cf -- __tests__/ lib/ app/
+  components/ scripts/` is empty, and the changed set is 3 `.md` files + `ci.yml`.
+  Evidence-accuracy nit; the AC-4 conclusion is unaffected and independently confirmed.
+- **F3 — a stale line in the executor's evidence doc.** It states the finished tip shows
+  "exactly the two expected `example.` occurrences and nothing else". That was true at
+  `b35f550`; at the **final** tip `d7292cf` there are five (all `example.`, all benign) once
+  the plan and evidence docs were force-added. The AC-1 verdict (`0` non-`example`) is
+  unaffected. Worth a one-line correction if the doc is touched again.
+- **F4 — the one non-fail-closed arm** in `blob_host_check` (see the monotonicity section).
+  Suggested hardening: capture the filter's rc and `return 2` on rc≥2 instead of `|| true`.
+- **F5 — CI's success line cannot distinguish "clean because filtered" from "clean because
+  the pattern matched nothing".** Both return 1 and print the same `blob-host check OK`
+  message. A future runner-side regex or flag regression would therefore be **silent** — the
+  closest this design comes to the repo's known vacuity class. Mitigations that make this
+  non-blocking: (a) an rc of 1 rather than a usage error proves the flags parsed; (b) I proved
+  power with the byte-identical block locally; (c) the repo permanently carries an `example.`
+  fixture the pattern must match. Suggested hardening: echo the raw class-match count (today
+  it would print `5`), so the CI log carries its own power signal on every run.
+- **F6 — a plan pointer that is not tracked.** The plan cites
+  `.ai-workspace/runbooks/1051-rotate-blob-token-runbook.md` as "already on file". It exists
+  on the operator's disk but is **not tracked** in the repo (`.ai-workspace/` is gitignored),
+  so it is not on the branch. Pre-existing condition, not introduced here; cosmetic.
+
+### Why PASS
+
+The core exposure is gone (AC-1 measured `1` → `0` with a same-shape control), the evidence
+survived the redaction rather than being shredded (AC-2, four sub-checks), the new guard has
+**demonstrated** power in six directions including the two blind spots the brief asked about —
+no `ci.yml` self-exclusion and no lookalike-subdomain escape — plus a proven fail-closed arm
+(AC-3), enforcement is live and observed executing on the real runner (AC-4), and neither
+operator-only action was smuggled in (AC-5). Both force-added artifacts re-scanned CLEAN by me
+with a working positive control, and the public PR body and commit messages are clean of the
+token. The six findings are hygiene, documentation accuracy, and hardening — none breaks a
+Binary AC or reintroduces the leak.
+
+**Blocking findings: none.** Recommend **squash-merge** (per F1). This review does not merge.
+
+Standing reminder carried forward, not a finding: merging this scrubs the *tree*, not the
+*history*. The real hostname remains readable in `origin/master`'s past commits and in this
+PR's own diff until the two deferred operator-only actions run — history purge, and rotation
+at #1051. Until rotation, the address is scrubbed but not revoked, exactly as the plan says.
+
+cairn: searched "privacy blob url", "vacuous", "fail-closed" via
+`node skills/cairn/bin/cairn-find.mjs`. Matched (quoted verbatim):
+`When writing a fail-closed shell check, use a three-way branch on the real return code (1=clean, 0=match found/FAIL, >=2=` —
+which is exactly the shape `blob_host_check` implements and which F4 flags the one deviation
+from; and `When validating a new fail-closed gate, prove it fires RED on a genuine violation first, not just` —
+why this review ran six live probes of the shipped block instead of reading it.

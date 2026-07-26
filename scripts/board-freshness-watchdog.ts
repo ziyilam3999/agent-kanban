@@ -26,7 +26,8 @@
 //   HEARTBEAT_DIR                  lane-heartbeat dir         (default ~/.claude/lane-heartbeats)
 //   SESSION_ID                     restrict activity to one session (default: all)
 //   SYNC_LOG                       sync logbook path          (default data/sync.log)
-//   BOARD_WATCHDOG_FOLD_SYNCLOG    fold sync.log ts into freshness (default 1/on)
+//   BOARD_WATCHDOG_FOLD_SYNCLOG    fold newest SUCCESS sync.log ts into freshness
+//                                  (default 1/on; failure records never count)
 //   BOARD_WATCHDOG_OFF             kill-switch env flag       (1/true/yes)
 //   BOARD_WATCHDOG_OFF_FILE        kill-switch dotfile        (default ~/.claude/.kanban-watchdog-off)
 //   BOARD_WATCHDOG_STATE_FILE      debounce state file        (default ~/.claude/.kanban-watchdog-state.json)
@@ -75,11 +76,23 @@ function readBoardMtimeMs(boardPath: string): number | null {
   }
 }
 
-/** Newest sync.log record ts (ms), or null if none/unreadable. Defensive secondary. */
+/** Newest SUCCESS sync.log record ts (ms) — `uploaded` | `skipped-unchanged` only —
+ * or null if none/unreadable. Defensive secondary.
+ *
+ * WHY success-only (2026-07-25/26 incident): the hook (on-task-change.sh) appends an
+ * `export-failed` record on every task change even when the courier toolchain cannot
+ * run at all (node_modules emptied → npm exit 127 → the courier's own #1405 streak
+ * alert never executes). Folding ANY record's ts turned that failing-hook spam into a
+ * perpetual freshness signal — the board froze for 28h while this watchdog would have
+ * read FRESH. Only a success record proves the remote board was actually delivered or
+ * confirmed; failure-class records (`failed`, `refused`, `skipped-no-token`,
+ * hook-written `export-failed`) must never count as freshness. */
 function lastSyncLogTsMs(logPath: string): number | null {
   const records = readSyncLog(logPath); // guarded: [] on any error
   for (let i = records.length - 1; i >= 0; i--) {
-    const t = Date.parse(records[i].ts);
+    const r = records[i];
+    if (r.result !== "uploaded" && r.result !== "skipped-unchanged") continue;
+    const t = Date.parse(r.ts);
     if (!Number.isNaN(t)) return t;
   }
   return null;
@@ -230,9 +243,11 @@ function resolveInputs(): DecisionInput {
   const syncLogPath = process.env.SYNC_LOG || path.join("data", "sync.log");
 
   let boardMtimeMs = readBoardMtimeMs(boardPath);
-  // Defensive secondary (D1): MAX-fold the newest sync.log ts so an actively-running
-  // courier (sync.log advancing) reads as fresh here — that keeps this watchdog
-  // COMPLEMENTARY with the in-process #1405 streak counter instead of double-alerting.
+  // Defensive secondary (D1, tightened post-2026-07-25 incident): MAX-fold the newest
+  // SUCCESS sync.log ts (uploaded | skipped-unchanged) so a courier that genuinely
+  // delivered/confirmed the remote board reads as fresh here. Failure records never
+  // count — a firing-but-failing hook advances the log tail without delivering a
+  // board, and folding those timestamps hid a 28h freeze as perpetual FRESH.
   // Never rescues a MISSING board (null stays null): a gone board.json is fail-closed.
   if (boardMtimeMs !== null && boolFromEnv("BOARD_WATCHDOG_FOLD_SYNCLOG", true)) {
     const syncTs = lastSyncLogTsMs(syncLogPath);

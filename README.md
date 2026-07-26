@@ -157,8 +157,9 @@ create the dotfile `~/.claude/.kanban-watchdog-off` (override with `BOARD_WATCHD
 **Config** (all env, sane defaults — nothing hardcoded): `BOARD_STALE_THRESHOLD_MS`
 (default 10 min), `BOARD_WATCHDOG_ACTIVE_WINDOW_MS` (default 8 min), `OUT` (board path),
 `LEDGER_DIR` / `HEARTBEAT_DIR` (reused from the exporter), `SYNC_LOG`,
-`BOARD_WATCHDOG_FOLD_SYNCLOG` (default on — folds the newest `sync.log` ts into freshness
-so an actively-running-but-failing courier stays the #1405 counter's job, not this one),
+`BOARD_WATCHDOG_FOLD_SYNCLOG` (default on — folds the newest **success** `sync.log` ts
+(`uploaded`/`skipped-unchanged`) into freshness; failure records never count, so a
+firing-but-failing pipeline cannot mask a frozen board),
 `BOARD_WATCHDOG_INTERVAL_S` (installer, default 120), `BOARD_WATCHDOG_LABEL`.
 
 **Who watches the watchdog (R1).** A launchd job can itself be unloaded or never

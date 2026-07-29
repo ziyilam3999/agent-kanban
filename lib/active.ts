@@ -29,16 +29,20 @@ export const ACTIVE_WINDOW_MS = 8 * 60 * 1000;
  * Upper bound on how long an IN-FLIGHT chain (see chainInFlight) stays live with
  * no observable event — the dead-lane cap (#1403). A chain that dies mid-role
  * (crashed subagent, abandoned in_progress task) in a still-live session must
- * not show live forever: after this long since its last observable event
- * (`updatedAt` max-folds task-file mtime + ledger mtime, and the #1350 spawn
- * heartbeat bumps it at every role boundary, so `updatedAt` IS "last chain
- * event") the lane goes dark. 6 h comfortably exceeds the multi-hour silent
- * executor legs that motivated the fix while bounding a zombie lane to under a
- * working day. Configurable: change here, or inject per call via the
- * `inflightCapMs` parameter of computeActiveIds. CAVEAT (F4): any later
- * task-file touch on a dead in-flight chain re-arms a fresh cap window
- * (`updatedAt` bumps), so this bounds time-since-last-EVENT, not
- * time-since-death — bounded and rare, accepted.
+ * not show live forever: after this long since the chain's OWN last open
+ * punch-in (the OPEN PUNCH-IN CLOCK, OPC — see openPunchInClock) the lane goes
+ * dark. 6 h comfortably exceeds the multi-hour silent executor legs that
+ * motivated the fix while bounding a zombie lane to under a working day.
+ * Configurable: change here, or inject per call via the `inflightCapMs`
+ * parameter of computeActiveIds.
+ *
+ * #1980 — the cap reads the lane's OWN open punch-in (OPC), not the ticket's
+ * `updatedAt` (task/ledger file mtime). A dead chain's OPC is frozen at its
+ * last open punch-in, so no later UNRELATED touch (a sweep, a clerk
+ * annotation, another agent's row, a reconcile pass) can re-arm a fresh cap
+ * window — the exact re-arm the previous F4 caveat used to excuse. When the
+ * OPC is UNKNOWN (no open-evidence row carries a parseable `ts`) the cap
+ * falls back to `updatedAt`, byte-identical to legacy behaviour (R1).
  */
 export const INFLIGHT_LANE_CAP_MS = 6 * 60 * 60 * 1000;
 
@@ -253,6 +257,115 @@ function hasAnyPipelineComment(t: Ticket): boolean {
 }
 
 /**
+ * Parse an ISO 8601 / `Date.parse`-able timestamp to ms-epoch, or `undefined`
+ * when the value is absent or unparseable (Date.parse NaN). The whole closure
+ * treats an unparseable `ts` as "no signal" — never as zero or now — so the
+ * OPC fold never throws on a NaN/missing `ts` (AC-6 is the witness).
+ */
+function parseTs(ts: string | undefined): number | undefined {
+  if (typeof ts !== "string") return undefined;
+  const ms = Date.parse(ts);
+  return Number.isNaN(ms) ? undefined : ms;
+}
+
+/**
+ * The OPEN PUNCH-IN CLOCK (OPC) — #1980. The newest parseable `ts` among the
+ * rows that constitute a ticket's CURRENT open in-flight evidence — exactly
+ * the rows whose existence makes `chainInFlight` true — or `undefined`
+ * (UNKNOWN) when no open-evidence row carries a parseable `ts`.
+ *
+ * Mirrors `chainInFlight`'s two-branch structure and `pipelineHasOpenPunchIn`'s
+ * per-agentId individuation VERBATIM, so the OPC and the in-flight predicate
+ * can never disagree about which rows are "open in-flight evidence":
+ *
+ *   - PIPELINE branch (any pipeline-role comment present): a "unit" is either
+ *     an agentId with >=1 pipeline row and NO `closedAt` on any of its rows
+ *     (punched-IN, reusing pipelineHasOpenPunchIn's individuation), or each
+ *     agentId-less open row (no `agentId`, no `closedAt` — its own always-open
+ *     unit, the back-compat path). The OPC is the max parseable `ts` over
+ *     every row of every punched-IN unit. Rows of punched-OUT agents (any
+ *     `closedAt` for that agentId), orchestrator/free-form roles, `closedAt`
+ *     values and file mtimes NEVER contribute.
+ *   - RESEARCH branch (no pipeline-role comment — research-only ticket, #1516):
+ *     each still-OPEN research row (no `closedAt`). The OPC is the max
+ *     parseable `ts` over the open research rows. (A chain-less ticket has
+ *     no open-evidence rows, so its OPC is UNKNOWN — but a chain-less ticket
+ *     is never in-flight, so the cap is never consulted on it.)
+ *
+ * Mixed parseability: if SOME open-evidence rows carry a parseable `ts` and
+ * others do not, the parseable ones govern (their max). The OPC is UNKNOWN
+ * ONLY when NO open-evidence row carries a parseable `ts` — and the cap then
+ * falls back to the legacy `updatedAt` clock (R1), mirroring the module's
+ * agentId-less back-compat doctrine. A single degraded row can therefore
+ * never immunise a lane against darkening (AC-6b): one parseable open
+ * punch-in is enough to set the clock.
+ *
+ * Never throws — a NaN/absent `ts` yields `undefined`, not a crash (AC-6).
+ */
+export function openPunchInClock(t: Ticket): number | undefined {
+  // PIPELINE branch iff any pipeline-role comment exists (mirrors chainInFlight).
+  let hasPipelineComment = false;
+  for (const c of t.comments) {
+    if (PIPELINE_ROLE_SET.has(c.role)) {
+      hasPipelineComment = true;
+      break;
+    }
+  }
+
+  if (hasPipelineComment) {
+    // Pass 1 — determine which agentIds are punched-IN, reusing
+    // pipelineHasOpenPunchIn's per-agentId rule (ANY closedAt row for an
+    // agentId marks it punched-OUT; the closed claim is absorbing).
+    const agentClosed = new Map<string, boolean>();
+    for (const c of t.comments) {
+      if (!PIPELINE_ROLE_SET.has(c.role)) continue;
+      if (c.agentId) {
+        agentClosed.set(
+          c.agentId,
+          (agentClosed.get(c.agentId) ?? false) || !!c.closedAt
+        );
+      }
+    }
+    // Pass 2 — collect the newest parseable ts among rows that belong to a
+    // still-punched-IN unit. An agentId'd row belongs iff its agent is
+    // punched-IN; an agentId-less row is its own unit and belongs iff it
+    // carries no closedAt (matching pipelineHasOpenPunchIn's back-compat path).
+    let opc: number | undefined;
+    for (const c of t.comments) {
+      if (!PIPELINE_ROLE_SET.has(c.role)) continue;
+      const openUnit = c.agentId
+        ? !(agentClosed.get(c.agentId) ?? false)
+        : !c.closedAt;
+      if (!openUnit) continue;
+      const ms = parseTs(c.ts);
+      if (ms !== undefined && (opc === undefined || ms > opc)) opc = ms;
+    }
+    return opc;
+  }
+
+  // RESEARCH branch — open research rows only (chainInFlight's fallback).
+  let opc: number | undefined;
+  for (const c of t.comments) {
+    if (c.role !== "research" || c.closedAt) continue;
+    const ms = parseTs(c.ts);
+    if (ms !== undefined && (opc === undefined || ms > opc)) opc = ms;
+  }
+  return opc;
+}
+
+/**
+ * #1980 — the lane's cap age (ms since its open punch-in clock), with the
+ * legacy `updatedAt` fallback when the OPC is UNKNOWN. Used by computeActiveIds
+ * to bound in-flight lanes by the chain's OWN evidence rather than by file
+ * mtime. The fallback preserves byte-identical legacy behaviour when no
+ * open-evidence row carries a parseable `ts` (R1).
+ */
+function laneCapAgeMs(t: Ticket, nowMs: number): number {
+  const opc = openPunchInClock(t);
+  return opc !== undefined ? nowMs - opc : nowMs - t.updatedAt;
+}
+
+/**
  * The set of ticket ids that should render the "actively in progress" heartbeat.
  *
  * Three disjuncts over the lane population of a LIVE session — the in_progress
@@ -336,11 +449,24 @@ export function computeActiveIds(
 
   // Disjunct 1 — IN-FLIGHT chains, bounded by the cap. Also gathers the
   // chain-state evidence that conditions the focus disjunct below.
+  // #1980 R1/R2 — the cap reads the lane's OWN open punch-in (OPC), not
+  // `updatedAt`, so an unrelated touch can no longer re-arm a dead chain. A
+  // chain whose open punch-in is itself beyond the cap is DEAD-BEYOND-CAP: it
+  // appears in NO returned active set (R2) — not here, not via the focus grant,
+  // not via the 8-minute window. `inFlightIds` still records EVERY in-flight
+  // chain (it is the chain-state evidence the focus disjunct consults), so a
+  // dead-beyond-cap chain keeps `inFlightIds.size` non-empty and correctly
+  // blocks the chain-less-rider focus fallback — exactly as before.
   const inFlightIds = new Set<string>();
+  const deadBeyondCapIds = new Set<string>();
   for (const t of inProgress) {
     if (chainInFlight(t)) {
       inFlightIds.add(t.id);
-      if (nowMs - t.updatedAt <= inflightCapMs) active.add(t.id);
+      if (laneCapAgeMs(t, nowMs) > inflightCapMs) {
+        deadBeyondCapIds.add(t.id);
+      } else {
+        active.add(t.id);
+      }
     }
   }
 
@@ -355,21 +481,33 @@ export function computeActiveIds(
   // chain history but is now all-punched-out (dead). A focus ticket with an
   // OPEN pipeline punch-in is unaffected — it is already in `inFlightIds`,
   // so `inFlightIds.has(focus.id)` (unchanged) keeps it lit either way.
+  // #1980 R2 — a dead-beyond-cap focus appears in NO active set: the grant
+  // is conjoined with `!deadBeyondCapIds.has(focus.id)`, closing the second
+  // uncapped re-light path. A focus with an OPEN punch-in within the cap is
+  // unaffected (it is already in `active` via disjunct 1).
   let focus = inProgress[0];
   for (const t of inProgress) {
     if (t.updatedAt > focus.updatedAt) focus = t;
   }
   if (
-    inFlightIds.has(focus.id) ||
-    (inFlightIds.size === 0 && !hasAnyPipelineComment(focus))
+    !deadBeyondCapIds.has(focus.id) &&
+    (inFlightIds.has(focus.id) ||
+      (inFlightIds.size === 0 && !hasAnyPipelineComment(focus)))
   ) {
     active.add(focus.id);
   }
 
   // Disjunct 3 — any other in-progress ticket genuinely touched within the
   // window (genuine parallel work — e.g. two roles active at once).
+  // #1980 R2 — a dead-beyond-cap chain is excluded here too, closing the
+  // third uncapped re-light path (a chain dead 19 days that happens to be
+  // touched within 8 minutes no longer re-lights). Chain-less / inline work
+  // is untouched — it is never in `deadBeyondCapIds`, so recency remains its
+  // only liveness signal exactly as documented.
   for (const t of inProgress) {
-    if (nowMs - t.updatedAt <= windowMs) active.add(t.id);
+    if (!deadBeyondCapIds.has(t.id) && nowMs - t.updatedAt <= windowMs) {
+      active.add(t.id);
+    }
   }
 
   return active;

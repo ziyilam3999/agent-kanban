@@ -142,15 +142,27 @@ describe("#1403 — chain-state lane liveness (in-flight chains survive silent l
   });
 
   it("AC-2: dead-lane cap — same in-flight fixture at NOW − 7h (> cap) → NOT active", () => {
+    // #1980 — the cap now reads the chain's OWN open punch-in (OPC), not
+    // `updatedAt`. The punch-in rows' `ts` must therefore be BEYOND the cap
+    // for this fixture to represent "a stale in-flight chain" at all (a fresh
+    // punch-in with a stale file mtime is a LIVE lane under the new clock, not
+    // a dead one). The rows are stamped to track the 7h updatedAt so the OPC
+    // is 7h-old and the cap darkens the lane — preserving the AC's intent
+    // ("beyond-cap in-flight chain → NOT active") under the OPC clock. The
+    // agentId-less back-compat units are unchanged; only their `ts` migrates.
     const focus = focusTicket();
+    const STALE_MIN = 7 * 60;
     const underTest = buildTicket(
       inProgressTask("ut"),
-      inFlightComments(),
-      NOW - 7 * 60 * MIN,
+      [
+        line("planner", STALE_MIN + 5),
+        line("plan-review", STALE_MIN, "PASS"),
+      ],
+      NOW - STALE_MIN * MIN,
       SID,
-      NOW - 7 * 60 * MIN
+      NOW - STALE_MIN * MIN
     );
-    expect(7 * 60 * MIN).toBeGreaterThan(INFLIGHT_LANE_CAP_MS);
+    expect(STALE_MIN * MIN).toBeGreaterThan(INFLIGHT_LANE_CAP_MS);
     const active = computeActiveIds([focus, underTest], true, NOW);
     expect(active.has("ut")).toBe(false);
   });
@@ -211,13 +223,19 @@ describe("#1403 — chain-state lane liveness (in-flight chains survive silent l
     it("(b') POSITIVE: newest execution-review verdict FAIL + 2h stale → STILL IN-FLIGHT → ACTIVE", () => {
       // Fail-class stays in-flight: the rework respawn writes no new JSONL
       // line, so treating FAIL as complete would darken every rework leg.
+      // #1980 — the punch-in rows' `ts` tracks `staleMin` so the OPC ages with
+      // the fixture: at 2h the open punch-in is within the 6h cap (ACTIVE);
+      // at 7h it is beyond the cap (DARK), preserving the AC's "bounded by the
+      // cap" intent under the OPC clock. The relative role spacing
+      // (10/5/2/0 min before the review) and the FAIL verdict are unchanged.
       const failChain = (staleMin: number) =>
         buildTicket(
           inProgressTask("ut"),
           [
-            ...inFlightComments(),
-            line("executor", 122),
-            line("execution-review", 121, "FAIL"),
+            line("planner", staleMin + 10),
+            line("plan-review", staleMin + 5, "PASS"),
+            line("executor", staleMin + 2),
+            line("execution-review", staleMin, "FAIL"),
           ],
           NOW - staleMin * MIN,
           SID,

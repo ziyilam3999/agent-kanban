@@ -151,4 +151,110 @@ punch-ins at the source; file as an ai-brain ticket if plan-review concurs.
 
 ## Review
 
-(pending — the independent plan-review seat writes its verdict here; the planner never does)
+### Round 1 (independent plan-review seat — did NOT author this plan)
+
+**Decision: PASS** (with 2 durable named-risk notes carried to execution-review + 3 executor guidance notes).
+
+Every load-bearing premise was re-derived by reading the live ledgers and the actual render-side
+code, not the plan's prose.
+
+**1. M1 re-derived from the live ledgers — CONFIRMED.** Read
+`~/.claude/3role-ledger/6bae4820.../1658-guard-build.jsonl` and `1660-scanner-build.jsonl`:
+- `1658-guard-build`: agent `a20f07198e90eed1b` has a `research` row WITH `closedAt`
+  `2026-08-23T11:13:27Z` AND a later `planner` row (ts `11:34:06`, `artifact_path` set, NO
+  `closedAt`). Same agentId on both.
+- `1660-scanner-build`: agent `a065ce9be1d6a7988` has a `research` row WITH `closedAt`
+  `2026-08-23T10:24:03Z` AND a later `planner` row (ts `11:23:18`, `artifact_path` set, NO
+  `closedAt`). Identical shape.
+- I traced `pipelineHasOpenPunchIn` (active.ts:188-204) by hand on both: `if
+  (!PIPELINE_ROLE_SET.has(c.role)) continue;` (line 192) SKIPS the `research` row before the
+  per-agentId `closedAt` scan, so `agentClosed[a20f07198e90eed1b]=false` (only its open `planner`
+  row is seen) -> the final loop returns `true` -> punched-IN -> `chainInFlight` true (no
+  execution-review => `newestExecReview===undefined` => `incompleteByState=true` => returns
+  `pipelineHasOpenPunchIn(t)`). The research close-stamp is genuinely filtered out.
+  M1's three sub-claims (a) open planner rows carry agentIds, (b) same-agent `closedAt` sits on a
+  `research` row, (c) the predicate filters non-pipeline roles BEFORE the closedAt scan — all hold.
+  The role-blind-closedAt disjunct darkens both: the research `closedAt` marks `a20f07198e90eed1b` /
+  `a065ce9be1d6a7988` stopped, so their open planner rows individuate to a punched-OUT agent.
+
+**2. Rule 18 — "artifact = done receipt" stress — SAFE under current writer behavior; carried as
+NRN-1.** The load-bearing question is whether a genuinely-RUNNING role ever carries an
+artifact/outcome row for longer than the 8-min recency window. Under today's writers it does not:
+the badge-at-spawn row (`three-role-spawn-ledger.sh`) stamps tier/version/effort but NO artifact;
+`artifact_path`/`verdict` are recorded at role CLOSE (the self-append "last act"), so a multi-hour
+silent EXECUTOR leg — the exact case the 6h cap exists for — carries NO artifact until it closes and
+therefore stays lit via disjunct-1 (no closedAt, no artifact) for the whole leg. Disjunct-1
+(role-blind `closedAt`, stamped only at SubagentStop) is the SAFE primary killer of M1; disjunct-2
+(artifact/verdict) is NECESSARY only for the agentId-LESS M2 case (no agentId to hang a closedAt on)
+and is the only mechanical discriminator available in the exported data (Options A and B correctly
+rejected). The residual exposure — a role that self-appends its artifact seconds before SubagentStop
+— is bounded to the 8-min window by disjunct-3, and the plan documents this accepted residual
+(lines 94-97). This is a conditional (writer-behavior) risk, NOT a present defect -> NAMED RISK, not
+a block.
+
+**3. Back-compat control AC-4 — PRESERVED.** A bare agentId-less AND outcome-less `{role, ts}`
+pipeline row hits neither disjunct-1 (no closedAt) nor disjunct-2 (no artifact/verdict) -> stays an
+always-open unit exactly as today (active.ts:196-197 returns true). The fix's discriminator is
+outcome-presence on the agentId-less row (M2 dark) vs outcome-absence (AC-4 lit); the #1980
+degraded-spawn path is not regressed.
+
+**4. Render-side sufficiency — CONFIRMED, no re-export needed.** Read `board-schema.ts`
+`LedgerComment` (carries `role`, `ts`, `agentId?`, `artifact?`, `verdict?`, `closedAt?`) and
+`build-board.ts` `toComment` (line 249 copies `agentId`, line 250 sets `c.artifact =
+redact(basenameOf(artifact_path))` — present iff `artifact_path` set, line 261 copies `closedAt`,
+line 269 sets `verdict` incl. the artifact-`Decision:` fallback for review roles). Every signal the
+invariant keys on is already on `board.json` comments. The "no `kanban:sync` / schema change" claim
+is TRUE.
+
+**5. Scope — CONFIRMED.** Fix is confined to `lib/active.ts` (`pipelineHasOpenPunchIn` + its #1980
+verbatim mirror in `openPunchInClock`) + one new `__tests__` file. `lib/lanes.ts` is a pure consumer
+of `computeActiveIds`/`pendingReviewInFlight` (verify-only). `lib/build-board.ts` is untouched
+(owned by `board-inprogress-recency`). No cross-file ship conflict.
+
+**Monotonicity (#1590) — clean.** The fix adds an ABSORBING "done" state per agentId/unit: once any
+`closedAt` (role-blind) OR any outcome (pipeline artifact/verdict) is seen, the unit is done and no
+later open-looking row can un-darken it (`agentClosed` OR-accumulates, order-independent — same
+shape as the existing line 194-195 fold). Stronger claim ("done") always beats the weaker ("open");
+the weaker survives ONLY when neither stronger signal exists. agentId-less units stay independent, so
+a genuine bare placeholder (AC-4) is NOT erased by a sibling agentId-less receipt (M2) on the same
+ticket — correct, since a live degraded-spawn role alongside a finished orchestrator note should keep
+the lane lit.
+
+**Named-risk notes carried to execution-review (registered durably via `named-risk-notes.mjs`):**
+- **NRN-1 (artifact=receipt validity):** disjunct-2 darkening is safe only while writers record
+  `artifact_path`/`verdict` at/near role CLOSE. Execution-review must read the diff and confirm no
+  genuinely-mid-flight long-running role (esp. executor) is darkened by artifact-presence beyond the
+  8-min window; the safe implementation restricts artifact-only darkening to the agentId-less M2 path
+  (or accepts the 8-min tail as the sole exposure).
+- **NRN-2 (role-blind closedAt reuse):** role-blind `closedAt` assumes an agentId with ANY
+  `closedAt` has permanently stopped. The live ledger shows the SAME agentId reused across
+  `research`->`planner` (`a20f07198e90eed1b`), currently always a reconcile/attribution artifact
+  (`run_source: reconcile-spawns`), never a live agent — so safe today. If a writer ever reuses one
+  agentId for a genuinely-live LATER role after an earlier role closed, this falsely darkens it.
+
+**Executor guidance (non-blocking):**
+- **G1 (lockstep):** apply the role-blind `closedAt` scan IDENTICALLY in BOTH
+  `pipelineHasOpenPunchIn` and `openPunchInClock` Pass-1 — the #1980 "can never disagree" invariant.
+  Pass-1's `agentClosed` map must scan ALL rows (research/orchestrator included) for `closedAt`, not
+  just pipeline rows, or the cap (`laneCapAgeMs`) and the predicate diverge. AC-5 pins this — make
+  the fixture actually exercise a cross-role closedAt.
+- **G2 (fixture window):** AC-1/AC-2 "goes dark" fixtures MUST set the ticket's `updatedAt` OUTSIDE
+  the 8-min `ACTIVE_WINDOW_MS` (while keeping every open-row `ts` inside the 6h cap), else disjunct-3
+  (recency) re-lights the ticket and the "absent" assertion cannot isolate the punch-in fix. The AC
+  preamble pins the cap direction but not this window direction.
+- **G3 (artifact truthiness):** disjunct-2 must key on the Ticket comment's `artifact` field
+  (present iff `artifact_path` was set; a real plan basename survives `redact` non-empty), truthy
+  check — not on a raw `artifact_path` that does not exist on the render-side `LedgerComment`.
+
+Nothing here is a blocking premise failure: the constructed counterexamples (mid-flight artifact,
+live agentId reuse after close) do not apply to current writer behavior and are carried forward as
+named risks per the round-1 named-risk-note contract. The plan fixes both measured mechanisms with
+signals already present in the exported data.
+
+### Deferred-follow-ups:
+- Writer-side ai-brain hygiene (orchestrator/reconcile bookkeeping appends stamp `closedAt` or a
+  non-pipeline marker role at write time) — plan-review CONCURS with the plan's line-148 item. This
+  is the real long-term fix behind NRN-1/NRN-2. -> file an ai-brain ticket when triggered (a live
+  false-live recurrence after this render-side fix ships, or the next writer-side touch).
+- NRN-1 / NRN-2 — carried to execution-review, registered durably via `named-risk-notes.mjs` (no
+  separate task now; decidable by reading the executor's actual diff at execution-review).

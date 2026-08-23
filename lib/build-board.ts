@@ -20,6 +20,13 @@ import type {
 } from "./board-schema";
 import { LIVE_WINDOW_MS } from "./board-schema";
 import { PIPELINE_ROLES, isFailClassVerdict } from "./ui-meta";
+// board-inprogress-recency — reuse the EXISTING "is this lane still alive"
+// threshold (lib/active.ts, #1980) for the pending→in_progress promotion's
+// recency gate, rather than minting a second identical 6h magic number. No
+// require cycle: active.ts imports only ./board-schema (type) + ./ui-meta,
+// and this module already imports ./ui-meta — see the Round-1 plan-review N1
+// note in .ai-workspace/plans/2026-08-23-board-inprogress-recency-guard.md.
+import { INFLIGHT_LANE_CAP_MS } from "./active";
 
 /** The canonical pipeline roles as a set (orchestrator is NOT a member). */
 const PIPELINE_ROLE_SET = new Set<string>(PIPELINE_ROLES);
@@ -190,6 +197,13 @@ export type ExecReviewState = "none" | "pending" | "resolved-nonfail" | "resolve
  * `hasPipelineRoleComment` is TRUE iff the ledger carries ≥1 comment whose role is a
  * PIPELINE_ROLES member (planner / plan-review / executor / execution-review).
  * orchestrator is EXCLUDED, so an orchestrator-only pending task stays in todo.
+ *
+ * board-inprogress-recency: the CALLER (buildTicket) decides what this flag
+ * means — "ever touched" (the pre-fix default, when buildTicket is called
+ * without `nowMs`) or "touched within INFLIGHT_LANE_CAP_MS of nowMs" (when
+ * `nowMs` is supplied, as scripts/export-board.ts does). toColumn's own
+ * signature/semantics are unchanged; it just consumes whichever boolean it's
+ * given.
  */
 export function toColumn(
   status: RawTask["status"],
@@ -317,13 +331,29 @@ export function newestExecutionReviewState(
  * the ledger mtime via `max` keeps the lane lit. NO-OP when `ledgerMtimeMs` is
  * undefined: `max(mtimeMs, 0) === mtimeMs` (mtimeMs is a positive epoch), so a
  * ticket with no ledger file behaves exactly as before.
+ *
+ * board-inprogress-recency — OPTIONAL, LAST `nowMs` param (appended, never
+ * inserted, so all pre-existing positional callers stay arity-valid — Round-1
+ * plan-review Blocker 1, resolution 1a). Semantics:
+ *   - `nowMs === undefined` (the ~19 non-updated callers: test files + the
+ *     ac0-1980 audit script): preserve the pre-fix "ever touched"
+ *     pending→in_progress promotion BYTE-IDENTICAL to today — fail-safe to
+ *     old behavior.
+ *   - `nowMs` supplied (ONLY scripts/export-board.ts, threading its existing
+ *     `Date.now()`): tighten the promotion to "≥1 pipeline-role comment
+ *     within INFLIGHT_LANE_CAP_MS of nowMs" — a started-but-abandoned pending
+ *     ticket (stale pipeline comment) falls back to todo instead of staying
+ *     in_progress forever. A comment with an unparseable/blank `ts`
+ *     (Date.parse → NaN) is treated as NO SIGNAL, never as "recent" — mirrors
+ *     the parseTs/newestExecutionReviewState NaN-guard precedent.
  */
 export function buildTicket(
   rawTask: RawTask,
   ledgerLines: RawLedgerLine[],
   mtimeMs: number,
   sessionId?: string,
-  ledgerMtimeMs?: number
+  ledgerMtimeMs?: number,
+  nowMs?: number
 ): Ticket {
   const comments = [...ledgerLines]
     .sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts))
@@ -332,9 +362,16 @@ export function buildTicket(
   const execReviewState = newestExecutionReviewState(ledgerLines);
   // TRUE iff any ledger comment is from a pipeline role (orchestrator excluded) —
   // lets a pending task that a role has already started surface as in_progress.
-  const hasPipelineRoleComment = ledgerLines.some((l) =>
-    PIPELINE_ROLE_SET.has(l.role)
-  );
+  // See the buildTicket doc comment above for the nowMs-gated recency semantics.
+  const hasPipelineRoleComment =
+    nowMs === undefined
+      ? ledgerLines.some((l) => PIPELINE_ROLE_SET.has(l.role))
+      : ledgerLines.some((l) => {
+          if (!PIPELINE_ROLE_SET.has(l.role)) return false;
+          const parsed = Date.parse(l.ts);
+          if (Number.isNaN(parsed)) return false; // no signal — never "recent"
+          return nowMs - parsed <= INFLIGHT_LANE_CAP_MS;
+        });
 
   const ticket: Ticket = {
     id: rawTask.id,

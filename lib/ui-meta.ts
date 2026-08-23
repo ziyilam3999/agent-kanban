@@ -43,6 +43,10 @@ export const ROLE_COLOR: Record<string, string> = {
   // keyed lookup with a `?? fallback` (roleColor below), additive only: it can
   // never corrupt pip count, doneCount, nextPending, or lanes.ts stage math.
   research: "var(--research)",
+  // cc-ship-tail-lane (2026-08-23) — the 5th OPERATIONAL seat, structurally parallel to research:
+  // executes a pre-cleared merge/ship recipe, never a REQUIRED/gating role. Same additive shape as
+  // research above — deliberately NOT added to PIPELINE_ROLES/WORK_PIPELINE_ROLES.
+  "ship-tail": "var(--ship-tail)",
 };
 
 /** Mono-caps label per role for the drawer timeline + pip tooltips. */
@@ -53,6 +57,7 @@ export const ROLE_LABEL: Record<string, string> = {
   "execution-review": "EXEC-REVIEW",
   orchestrator: "ORCHESTRATOR",
   research: "RESEARCH",
+  "ship-tail": "SHIP-TAIL",
 };
 
 export function roleColor(role: string): string {

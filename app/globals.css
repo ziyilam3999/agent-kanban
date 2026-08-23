@@ -37,6 +37,13 @@
      (relative-luminance formula, both sRGB->linear) — clears AA (4.5:1). */
   --research: #b98ef2;
 
+  /* Ship-tail seat (cc-ship-tail-lane, 2026-08-23) — a distinct blue hue from every other role/
+     status color in use (not the cyan of --prog, not the violet of --research), signalling "5th
+     operational seat, executes a pre-cleared merge/ship recipe, not a required chain stage" at a
+     glance, same additive shape as --research. WCAG-computed ~7.583:1 on --panel (relative-
+     luminance formula, both sRGB->linear) — clears AA (4.5:1) with headroom. */
+  --ship-tail: #7aa8f5;
+
   /* On-hold seat (#1816) — a dusty, deliberately DULLER/COOLER ochre than
      --review's bright amber (#f2b03e) so a parked card is never mistaken for
      an IN-REVIEW one at a glance. WCAG-verified ~7.118:1 on --panel (same
@@ -1034,6 +1041,33 @@ button {
 }
 @media (prefers-reduced-motion: reduce) {
   .ak-tag--research-open {
+    animation: none;
+  }
+}
+
+/* cc-ship-tail-lane (2026-08-23) — ship-tail seat chip. Same shape as .ak-tag--research above
+   (proven pattern), own hue (--ship-tail, blue) so it never reads as a pipeline pip or an epic
+   ref. `--ship-tail-open` mirrors `--research-open`'s opacity-only pulse, own keyframe (a scaling
+   keyframe would jitter a short text chip). */
+.ak-tag--ship-tail {
+  color: color-mix(in srgb, var(--ship-tail) 80%, #eee);
+  border-color: color-mix(in srgb, var(--ship-tail) 40%, transparent);
+  background: color-mix(in srgb, var(--ship-tail) 10%, transparent);
+}
+.ak-tag--ship-tail-open {
+  animation: ak-ship-tail-pulse 2.2s ease-in-out infinite;
+}
+@keyframes ak-ship-tail-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ak-tag--ship-tail-open {
     animation: none;
   }
 }

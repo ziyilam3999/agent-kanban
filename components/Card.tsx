@@ -47,6 +47,13 @@ export function Card({ ticket, nowMs, glow, active, sessionLastActive, reduce }:
   const researchComments = ticket.comments.filter((c) => c.role === "research");
   const hasResearch = researchComments.length > 0;
   const researchOpen = researchComments.some((c) => !c.closedAt);
+  // cc-ship-tail-lane (2026-08-23) — same additive chip pattern as research above: ship-tail is
+  // deliberately NOT in PIPELINE_ROLES (stays exactly four), so it never draws a 5th pip. Render
+  // it as a distinct chip instead. `shipTailOpen` tracks whether ANY ship-tail comment is still
+  // un-close-stamped — informational only, does NOT drive the card's `active` glow.
+  const shipTailComments = ticket.comments.filter((c) => c.role === "ship-tail");
+  const hasShipTail = shipTailComments.length > 0;
+  const shipTailOpen = shipTailComments.some((c) => !c.closedAt);
   // Lift a leading "[#1063]" / "[EPIC]" prefix out of the subject so it doesn't read as a
   // second ticket id next to the card's own #id — render it as a distinct chip instead.
   const subjectTag = parseSubjectTag(ticket.subject);
@@ -82,6 +89,15 @@ export function Card({ ticket, nowMs, glow, active, sessionLastActive, reduce }:
               title={`${roleLabel("research")}${researchOpen ? " — in flight" : " — done"}`}
             >
               {roleLabel("research")}
+            </span>
+          )}
+          {hasShipTail && (
+            <span
+              className={`ak-tag ak-tag--ship-tail${shipTailOpen ? " ak-tag--ship-tail-open" : ""}`}
+              style={{ ["--ship-tail-hue" as string]: roleColor("ship-tail") }}
+              title={`${roleLabel("ship-tail")}${shipTailOpen ? " — in flight" : " — done"}`}
+            >
+              {roleLabel("ship-tail")}
             </span>
           )}
           <span

@@ -27,7 +27,7 @@ export const LIVE_WINDOW_MS = 5 * 60 * 1000;
 
 /** One role event from the 3-role ledger = one agent comment on a card. */
 export interface LedgerComment {
-  /** planner | plan-review | executor | execution-review | orchestrator (free-form tolerated) */
+  /** planner | plan-review | executor | execution-review | orchestrator | research | ship-tail (free-form tolerated) */
   role: string;
   /** ISO 8601 timestamp from the ledger line. */
   ts: string;
@@ -53,13 +53,12 @@ export interface LedgerComment {
   modelTier?: string;
   effort?: string;
   /**
-   * EXPLICIT close-stamp (#1516) — an ISO 8601 timestamp written ONLY by ai-brain's
-   * three-role-subagent-ledger.sh (the sole writer that fires exclusively at
-   * SubagentStop/close), never inferred from agentId or any other field. This is
-   * the research seat's punch-out signal: a research comment WITHOUT it is
-   * in-flight, WITH it is done (see lib/active.ts chainInFlight). Back-compat
-   * optional on every role — absent on all pre-#1516 ledger lines and on every
-   * non-research role today.
+   * EXPLICIT close-stamp (#1516; widened cc-ship-tail-lane 2026-08-23) — an ISO 8601 timestamp
+   * written ONLY by ai-brain's three-role-subagent-ledger.sh (the sole writer that fires
+   * exclusively at SubagentStop/close), never inferred from agentId or any other field. This is
+   * the research AND ship-tail seats' punch-out signal: a research/ship-tail comment WITHOUT it
+   * is in-flight, WITH it is done (see lib/active.ts chainInFlight). Back-compat optional on every
+   * role — absent on all pre-#1516 ledger lines and on every non-research/non-ship-tail role today.
    */
   closedAt?: string;
 }

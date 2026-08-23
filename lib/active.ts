@@ -12,7 +12,7 @@
 // current focus and always breathes; any OTHER in-progress ticket also breathes
 // while it was genuinely touched within the (widened) window, for parallel work.
 
-import type { Ticket } from "./board-schema";
+import type { Ticket, LedgerComment } from "./board-schema";
 import {
   isHeld,
   PIPELINE_ROLES,
@@ -184,23 +184,78 @@ export function chainInFlight(t: Ticket): boolean {
  * together with the authoritative agentId by the sole close-time writer, so
  * an agentId-less row realistically never carries `closedAt` in production —
  * this is a back-compat fallback, not the common case).
+ *
+ * board-lanes-live (2026-08-23) — TWO further disjuncts, discriminated by
+ * signals already present on the exported comment (no re-export needed):
+ *
+ *   1. AGENT-STOP EVIDENCE IS ROLE-BLIND (plan review G1). `closedAt` on ANY
+ *      row for an agentId — a `research` row, an orchestrator row, any role
+ *      — marks that agent stopped; a stopped one-shot subagent cannot hold
+ *      any lane open under any later role. This is computed by
+ *      `buildAgentClosedAnywhere` below, which scans EVERY comment
+ *      regardless of role (not just PIPELINE_ROLE_SET) — the live measured
+ *      case: an agent's `research` row carries `closedAt` while its later
+ *      `planner` row (same agentId, no `closedAt`) would otherwise read
+ *      punched-IN forever.
+ *   2. OUTCOME-BEARING AGENTID-LESS ROWS ARE RECEIPTS, NOT PUNCH-INS. An
+ *      agentId-less pipeline row that records a completed outcome (a
+ *      deliverable `artifact`, or a review `verdict`) is a bookkeeping
+ *      receipt — e.g. an orchestrator fallback append with no resolvable
+ *      agentId — not a live always-open unit. Restricted to the
+ *      agentId-LESS path only (see `hasOutcome` below + NRN-1): an
+ *      agentId'd row's liveness is decided ENTIRELY by disjunct 1's
+ *      role-blind `closedAt`, never by artifact presence alone, so a
+ *      genuinely mid-flight long-running role (which carries no artifact
+ *      until it closes) is never darkened early. A bare agentId-less
+ *      `{role, ts}` row with NO outcome and NO closedAt is UNCHANGED — it
+ *      stays its own always-open unit exactly as before (the #1980
+ *      degraded-spawn back-compat path, held out by AC-4).
  */
 function pipelineHasOpenPunchIn(t: Ticket): boolean {
-  // agentId -> true once ANY row for that agentId has been seen with closedAt.
-  const agentClosed = new Map<string, boolean>();
+  const agentClosedAnywhere = buildAgentClosedAnywhere(t);
+  const pipelineAgentIds = new Set<string>();
   for (const c of t.comments) {
     if (!PIPELINE_ROLE_SET.has(c.role)) continue;
     if (c.agentId) {
-      const alreadyClosed = agentClosed.get(c.agentId) ?? false;
-      agentClosed.set(c.agentId, alreadyClosed || !!c.closedAt);
-    } else if (!c.closedAt) {
-      return true; // agentId-less open row — its own always-open unit
+      pipelineAgentIds.add(c.agentId);
+    } else if (!c.closedAt && !hasOutcome(c)) {
+      return true; // agentId-less, no closedAt, no outcome — always-open unit
     }
   }
-  for (const closed of agentClosed.values()) {
-    if (!closed) return true; // an agent with >=1 row, none carrying closedAt
+  for (const id of pipelineAgentIds) {
+    if (!agentClosedAnywhere.get(id)) return true; // never stopped anywhere
   }
   return false;
+}
+
+/**
+ * board-lanes-live — Pass 1 shared by `pipelineHasOpenPunchIn` and
+ * `openPunchInClock` (the #1980 "can never disagree" lockstep, plan G1):
+ * agentId -> true once ANY row for that agentId — ANY role, pipeline or not
+ * — has been seen carrying `closedAt`. Role-blind by design: a `research`
+ * row's `closedAt` stops the agent just as surely as a `planner` row's would.
+ */
+function buildAgentClosedAnywhere(t: Ticket): Map<string, boolean> {
+  const agentClosedAnywhere = new Map<string, boolean>();
+  for (const c of t.comments) {
+    if (!c.agentId) continue;
+    const already = agentClosedAnywhere.get(c.agentId) ?? false;
+    agentClosedAnywhere.set(c.agentId, already || !!c.closedAt);
+  }
+  return agentClosedAnywhere;
+}
+
+/**
+ * board-lanes-live — TRUE iff a comment records a completed outcome: a
+ * deliverable `artifact` (truthy — the render-side field set iff
+ * `artifact_path` was recorded, per plan G3; NOT a raw `artifact_path`,
+ * which does not exist on the exported `LedgerComment`), or a non-empty
+ * review `verdict`. Consumed ONLY for the agentId-less individuation branch
+ * (NRN-1) — never applied to an agentId'd row, whose liveness is decided
+ * entirely by `buildAgentClosedAnywhere`'s role-blind `closedAt`.
+ */
+function hasOutcome(c: LedgerComment): boolean {
+  return !!c.artifact || !!(c.verdict && c.verdict.trim());
 }
 
 /**
@@ -313,29 +368,27 @@ export function openPunchInClock(t: Ticket): number | undefined {
   }
 
   if (hasPipelineComment) {
-    // Pass 1 — determine which agentIds are punched-IN, reusing
-    // pipelineHasOpenPunchIn's per-agentId rule (ANY closedAt row for an
-    // agentId marks it punched-OUT; the closed claim is absorbing).
-    const agentClosed = new Map<string, boolean>();
-    for (const c of t.comments) {
-      if (!PIPELINE_ROLE_SET.has(c.role)) continue;
-      if (c.agentId) {
-        agentClosed.set(
-          c.agentId,
-          (agentClosed.get(c.agentId) ?? false) || !!c.closedAt
-        );
-      }
-    }
+    // Pass 1 (board-lanes-live plan G1) — role-blind: reuses
+    // buildAgentClosedAnywhere VERBATIM (the same function
+    // pipelineHasOpenPunchIn calls), which scans ALL comments for ANY role —
+    // not just PIPELINE_ROLE_SET — so a `closedAt` on a non-pipeline row
+    // (e.g. `research`) stops the agent here too. This is the #1980 "can
+    // never disagree" lockstep: sharing the exact same helper, rather than a
+    // hand-copied re-derivation, is what makes divergence structurally
+    // impossible.
+    const agentClosedAnywhere = buildAgentClosedAnywhere(t);
     // Pass 2 — collect the newest parseable ts among rows that belong to a
-    // still-punched-IN unit. An agentId'd row belongs iff its agent is
-    // punched-IN; an agentId-less row is its own unit and belongs iff it
-    // carries no closedAt (matching pipelineHasOpenPunchIn's back-compat path).
+    // still-punched-IN unit, mirroring pipelineHasOpenPunchIn's Pass 2
+    // individuation VERBATIM: an agentId'd row belongs iff its agent never
+    // stopped anywhere; an agentId-less row belongs iff it carries no
+    // `closedAt` AND no recorded outcome (`hasOutcome` — board-lanes-live
+    // disjunct 2, restricted to the agentId-less path per NRN-1).
     let opc: number | undefined;
     for (const c of t.comments) {
       if (!PIPELINE_ROLE_SET.has(c.role)) continue;
       const openUnit = c.agentId
-        ? !(agentClosed.get(c.agentId) ?? false)
-        : !c.closedAt;
+        ? !(agentClosedAnywhere.get(c.agentId) ?? false)
+        : !c.closedAt && !hasOutcome(c);
       if (!openUnit) continue;
       const ms = parseTs(c.ts);
       if (ms !== undefined && (opc === undefined || ms > opc)) opc = ms;

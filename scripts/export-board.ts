@@ -272,12 +272,20 @@ function main(): void {
           const parsed = readTask(file);
           if (!parsed) return null;
           const ledger = readLedger(s.sessionId, parsed.task.id);
+          // board-inprogress-recency — thread the SAME `now` already captured
+          // above (no second Date.now() — N2) so buildTicket's pending→
+          // in_progress promotion is gated on recency instead of "ever
+          // touched" (#1980's INFLIGHT_LANE_CAP_MS window). This is the ONLY
+          // call site that opts in; every other buildTicket caller (tests,
+          // the ac0-1980 audit script) omits nowMs and keeps the old
+          // ever-touched behavior (fail-safe, Round-1 resolution 1a).
           return buildTicket(
             parsed.task,
             ledger,
             parsed.mtimeMs,
             sid,
-            s.ledgerMtimes.get(parsed.task.id)
+            s.ledgerMtimes.get(parsed.task.id),
+            now
           );
         })
         .filter((t): t is NonNullable<typeof t> => t !== null);

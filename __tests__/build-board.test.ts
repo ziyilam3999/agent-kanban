@@ -14,6 +14,7 @@ import {
   type RawLedgerLine,
 } from "@/lib/build-board";
 import { COLUMNS, type Board, type Ticket } from "@/lib/board-schema";
+import { INFLIGHT_LANE_CAP_MS } from "@/lib/active";
 
 describe("toColumn", () => {
   it("maps completed → done", () => {
@@ -96,6 +97,117 @@ describe("buildTicket — pending derives in_progress from ledger activity", () 
       1
     );
     expect(t.column).toBe("done");
+  });
+});
+
+// board-inprogress-recency — the pending→in_progress promotion is gated on
+// RECENCY (a pipeline-role comment within INFLIGHT_LANE_CAP_MS of `nowMs`),
+// not "ever touched", but ONLY when `nowMs` is supplied. See
+// .ai-workspace/plans/2026-08-23-board-inprogress-recency-guard.md
+// "## Round 1 fold — FINAL SPEC" for the authoritative spec this implements.
+describe("buildTicket — pending→in_progress recency guard (nowMs)", () => {
+  const NOW = 1_700_000_000_000;
+  const tsMsBefore = (ms: number) => new Date(NOW - ms).toISOString();
+
+  // AC-1 (control, stale→todo): a pending ticket whose newest pipeline
+  // comment is OLDER than INFLIGHT_LANE_CAP_MS before nowMs → todo.
+  it("AC-1: pending + a pipeline comment OLDER than INFLIGHT_LANE_CAP_MS before nowMs → todo", () => {
+    const t = buildTicket(
+      baseTask({ status: "pending" }),
+      [{ role: "executor", ts: tsMsBefore(INFLIGHT_LANE_CAP_MS + 60_000) }],
+      1,
+      undefined,
+      undefined,
+      NOW
+    );
+    expect(t.column).toBe("todo");
+  });
+
+  // AC-2 (control, fresh→in_progress): a pending ticket with a pipeline
+  // comment WITHIN INFLIGHT_LANE_CAP_MS of nowMs → in_progress.
+  it("AC-2: pending + a pipeline comment WITHIN INFLIGHT_LANE_CAP_MS of nowMs → in_progress", () => {
+    const t = buildTicket(
+      baseTask({ status: "pending" }),
+      [{ role: "executor", ts: tsMsBefore(60_000) }],
+      1,
+      undefined,
+      undefined,
+      NOW
+    );
+    expect(t.column).toBe("in_progress");
+  });
+
+  it("exactly AT the INFLIGHT_LANE_CAP_MS boundary is still recent (<=, inclusive)", () => {
+    const t = buildTicket(
+      baseTask({ status: "pending" }),
+      [{ role: "executor", ts: tsMsBefore(INFLIGHT_LANE_CAP_MS) }],
+      1,
+      undefined,
+      undefined,
+      NOW
+    );
+    expect(t.column).toBe("in_progress");
+  });
+
+  // AC-3 (genuine in_progress unaffected): a ticket with status==="in_progress"
+  // stays in_progress regardless of comment age, even when nowMs is supplied.
+  it("AC-3: status===in_progress stays in_progress regardless of comment age (nowMs supplied)", () => {
+    const t = buildTicket(
+      baseTask({ status: "in_progress" }),
+      [{ role: "executor", ts: tsMsBefore(INFLIGHT_LANE_CAP_MS * 10) }],
+      1,
+      undefined,
+      undefined,
+      NOW
+    );
+    expect(t.column).toBe("in_progress");
+  });
+
+  it("AC-3b: status===in_progress stays in_progress with ZERO comments (nowMs supplied)", () => {
+    const t = buildTicket(baseTask({ status: "in_progress" }), [], 1, undefined, undefined, NOW);
+    expect(t.column).toBe("in_progress");
+  });
+
+  // AC-4 (fail-safe): calling buildTicket WITHOUT nowMs reproduces today's
+  // ever-touched promotion — pins the undefined-nowMs branch explicitly.
+  it("AC-4: omitting nowMs reproduces the pre-fix ever-touched promotion (fail-safe)", () => {
+    const veryStale = buildTicket(
+      baseTask({ status: "pending" }),
+      [{ role: "executor", ts: tsMsBefore(INFLIGHT_LANE_CAP_MS * 100) }],
+      1
+      // sessionId, ledgerMtimeMs, nowMs all omitted
+    );
+    expect(veryStale.column).toBe("in_progress"); // ever-touched, no recency gate applied
+
+    const noComments = buildTicket(baseTask({ status: "pending" }), [], 1);
+    expect(noComments.column).toBe("todo"); // unaffected either way
+  });
+
+  it("a comment with an unparseable ts is treated as no-signal, never as recent", () => {
+    const t = buildTicket(
+      baseTask({ status: "pending" }),
+      [{ role: "executor", ts: "not-a-date" }],
+      1,
+      undefined,
+      undefined,
+      NOW
+    );
+    expect(t.column).toBe("todo");
+  });
+
+  it("a stale pipeline comment PLUS a fresh orchestrator-only comment still stays todo (orchestrator excluded)", () => {
+    const t = buildTicket(
+      baseTask({ status: "pending" }),
+      [
+        { role: "executor", ts: tsMsBefore(INFLIGHT_LANE_CAP_MS + 60_000) },
+        { role: "orchestrator", ts: tsMsBefore(60_000) },
+      ],
+      1,
+      undefined,
+      undefined,
+      NOW
+    );
+    expect(t.column).toBe("todo");
   });
 });
 

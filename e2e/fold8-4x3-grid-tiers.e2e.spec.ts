@@ -176,7 +176,6 @@ test.describe("Fold8 4:3 — AC-2 portrait 2x2 + independent column scroll (750x
       fullPage: false,
     });
 
-    const otherCols = page.locator(".ak-col").nth(1);
     const before = await page.evaluate(() => ({
       other: document.querySelectorAll(".ak-col")[1]?.scrollTop ?? 0,
       win: window.scrollY,
@@ -195,7 +194,6 @@ test.describe("Fold8 4:3 — AC-2 portrait 2x2 + independent column scroll (750x
     expect(after.todo).toBeGreaterThan(0);
     expect(after.other).toBe(before.other);
     expect(after.win).toBe(before.win);
-    void otherCols; // locator kept for readability of intent above
 
     const docScroll = await page.evaluate(() => ({
       scrollHeight: document.documentElement.scrollHeight,

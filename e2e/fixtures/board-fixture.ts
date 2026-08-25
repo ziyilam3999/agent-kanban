@@ -34,6 +34,13 @@ interface BuildOpts {
    * unchanged (back-compat: live-swimlanes still sees exactly liveLanes + 3 cards).
    */
   longSubjectTicket?: { id: string; subject: string };
+  /**
+   * Extra plain (non-live, old-timestamp) `todo` tickets — the fold8-4x3 grid-tier
+   * ACs need a TODO column deep enough to overflow a `.ak-col`'s height (AC-2's
+   * scrollHeight > clientHeight independent-scroll check). Undefined/0 for
+   * existing callers => ticket count unchanged (back-compat).
+   */
+  extraTodoCount?: number;
 }
 
 /**
@@ -42,7 +49,12 @@ interface BuildOpts {
  * column board always has content. With `live:false` the session is idle so
  * computeActiveIds returns the empty set (k=0 — counter absent).
  */
-export function buildBoard({ liveLanes, live = true, longSubjectTicket }: BuildOpts): Board {
+export function buildBoard({
+  liveLanes,
+  live = true,
+  longSubjectTicket,
+  extraTodoCount,
+}: BuildOpts): Board {
   const now = Date.now();
   const tickets: Ticket[] = [];
 
@@ -95,6 +107,23 @@ export function buildBoard({ liveLanes, live = true, longSubjectTicket }: BuildO
       blockedBy: [],
       comments: [],
       updatedAt: now - 20 * 60_000,
+      sessionId: SESSION_ID,
+    });
+  }
+
+  // Extra plain `todo` tickets (fold8-4x3 AC-2's overflow depth). Old + never
+  // active — same shape as the context tickets above, just numbered distinctly
+  // so they never collide with ctx/lane/longSubjectTicket ids.
+  for (let i = 0; i < (extraTodoCount ?? 0); i++) {
+    tickets.push({
+      id: `8${String(i).padStart(3, "0")}`,
+      subject: `Fold8 AC-probe fixture ticket #${i + 1} — a moderately long subject line exercising the 2-line clamp and card density under the compact grid-tier card variant`,
+      description: "",
+      column: "todo",
+      status: "pending",
+      blockedBy: [],
+      comments: [],
+      updatedAt: now - (30 + i) * 60_000,
       sessionId: SESSION_ID,
     });
   }

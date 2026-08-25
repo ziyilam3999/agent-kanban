@@ -314,7 +314,7 @@ export function BoardView({ initial }: { initial: Board }) {
         <PipelineMeter tickets={visible} />
       </header>
 
-      <main>
+      <main className="ak-main">
         {lanes.length >= 2 && (
           <LiveSwimlanes
             ref={panelRef}
@@ -325,7 +325,7 @@ export function BoardView({ initial }: { initial: Board }) {
         )}
 
         <div
-          className="ak-strip"
+          className="ak-strip ak-board"
           ref={stripRef}
           onScroll={onStripScroll}
           aria-label="pipeline columns"

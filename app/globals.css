@@ -1641,7 +1641,31 @@ button {
    ordinary flex/grid box chain below (.ak-app 100dvh grid -> .ak-main flex
    column -> .ak-board flex:1 1 auto), never from size containment. */
 
-@media (min-width: 640px) and (max-width: 1023.98px) {
+/* BUGFIX (fold8-4x3-bugfix): the shell clamp below (100dvh + overflow:hidden
+   on .ak-app/.ak-main/.ak-board) is what makes the grid tiers' per-column
+   `overflow-y:auto` the ONLY scroll path in this band — it should apply ONLY
+   when a grid tier is actually active underneath it. Root-cause read of
+   operator bug 1 ("fold-open landscape can't scroll up/down/left/right"): the
+   OLD unconditional `min-width:640/max-width:1023.98` clamp fired for EVERY
+   cell in the band, including the sub-band where NEITHER grid tier's own gate
+   is satisfied (width 640-899.98cqw AND height <700px — the 4-up tier needs
+   width>=900cqw; the 2x2 tier needs min-height:700px). In that cell the clamp
+   hid overflow on app/main/board while `.ak-col` stayed the un-scrollable
+   base flex item (flex:0 0 88vw, overflow:visible) — content had no scroll
+   path on either axis (repro point: 840x660). Fix: OR the two conditions
+   that are each grid tier's OWN literal gate — `(min-width:900px) and
+   (max-width:1023.98px)` (4-up, width-only) OR `(min-width:640px) and
+   (max-width:899.98px) and (min-height:700px)` (2x2's exact gate) — so the
+   clamp now tracks grid-tier presence instead of the wider band. Outside
+   both gates the shell falls back to the SAME base/phone rules (page scroll
+   + base .ak-strip overflow-x:auto flex strip) already exercised by AC-4's
+   phone control — a general fallback via the tiers' existing gates, not a
+   new fixture-specific number. The collapsed-header/meterbar/lanes cosmetics
+   below are unchanged and stay on the full unconditional 640-1023.98 band
+   (pure chrome, no scroll impact). */
+@media
+  (min-width: 900px) and (max-width: 1023.98px),
+  (min-width: 640px) and (max-width: 899.98px) and (min-height: 700px) {
   /* ---- 100dvh shell: header auto / board 1fr, per-column scroll enabler ---- */
   .ak-app {
     height: 100dvh;
@@ -1665,7 +1689,9 @@ button {
     min-height: 0;
     overflow: hidden;
   }
+}
 
+@media (min-width: 640px) and (max-width: 1023.98px) {
   /* ---- Collapsed one-row header (design brief §4) ---- */
   .ak-header {
     padding: 5px 14px 4px;

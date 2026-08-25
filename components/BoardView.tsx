@@ -2,14 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { useReducedMotion } from "motion/react";
 import type { Board, Column, Ticket } from "@/lib/board-schema";
 import { COLUMNS, COLUMN_LABELS } from "@/lib/board-schema";
 import { computeActiveIds } from "@/lib/active";
 import { deriveLanes } from "@/lib/lanes";
 import { decideLaneReveal } from "@/lib/lane-reveal";
-import { COLUMN_HUE } from "@/lib/ui-meta";
-import { Card } from "./Card";
+import { BoardColumn } from "./BoardColumn";
 import { LiveSwimlanes } from "./LiveSwimlanes";
 import { PipelineMeter } from "./PipelineMeter";
 import { SessionPicker } from "./SessionPicker";
@@ -75,6 +74,18 @@ export function BoardView({ initial }: { initial: Board }) {
   // Map of ticket-id -> last-seen column, for per-poll diffing. Scoped to the
   // selected session (see the session-change reset effect below).
   const prevCols = useRef<Map<string, Column>>(new Map());
+  // BUGFIX (fold8-4x3-bugfix, operator bug 3 — "everything feels slow"): the
+  // raw JSON text of the last-applied /api/board response. Root cause: every
+  // 5s poll unconditionally called `setBoard(next); setNow(Date.now())` even
+  // when the payload was byte-identical to what's already rendered — `next`
+  // is always a FRESH JSON.parse (new object refs for ~1000+ tickets), so an
+  // unchanged tick still forced a full board reconcile (+ a `now`-driven
+  // re-render of every Card) on the main thread, right when a tap/scroll
+  // might land (operator-measured 227ms INP / 200-260ms input delays). Fix:
+  // compare the raw response TEXT (general — content-independent, not keyed
+  // to any fixture) before parsing/diffing/setting state; an identical tick
+  // short-circuits to a true no-op.
+  const lastRawBoardRef = useRef<string | null>(null);
   // Latest selected-session id, readable inside the (deps-empty) poll closure.
   const currentSessionIdRef = useRef<string | undefined>(undefined);
   const stripRef = useRef<HTMLDivElement>(null);
@@ -97,8 +108,13 @@ export function BoardView({ initial }: { initial: Board }) {
       try {
         const res = await fetch("/api/board", { cache: "no-store" });
         if (!res.ok) return;
-        const next: Board = await res.json();
+        const rawText = await res.text();
         if (!alive) return;
+        // Unchanged payload -> true no-op: skip parse + diff + setState
+        // entirely (no setBoard, no setNow, zero re-render this tick).
+        if (rawText === lastRawBoardRef.current) return;
+        lastRawBoardRef.current = rawText;
+        const next: Board = JSON.parse(rawText);
 
         // Diff only the SELECTED session's tickets so movement/fresh glow is
         // per-session (the full board carries every session's tickets now).
@@ -331,69 +347,18 @@ export function BoardView({ initial }: { initial: Board }) {
           aria-label="pipeline columns"
         >
           {COLUMNS.map((col) => (
-            <section className="ak-col" key={col} aria-label={COLUMN_LABELS[col]}>
-              <div
-                className="ak-col__head"
-                style={{ ["--hue" as string]: COLUMN_HUE[col] }}
-              >
-                <span className="ak-col__rail" aria-hidden />
-                <span className="ak-col__name">{COLUMN_LABELS[col]}</span>
-                <span className="ak-col__count">{grouped[col].length}</span>
-              </div>
-
-              <div className="ak-col__body">
-                <AnimatePresence initial={false}>
-                  {grouped[col].length === 0 ? (
-                    <div className="ak-col__empty" key="__empty">
-                      no tickets
-                    </div>
-                  ) : (
-                    grouped[col].map((t) => (
-                      <motion.button
-                        key={t.id}
-                        type="button"
-                        layout={!reduce}
-                        className="ak-cardbtn"
-                        aria-label={`Open ticket #${t.id}: ${t.subject}`}
-                        onClick={() => setSelectedId(t.id)}
-                        initial={
-                          fresh.has(t.id) && !reduce
-                            ? { opacity: 0, y: 10 }
-                            : false
-                        }
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={
-                          reduce
-                            ? { opacity: 0 }
-                            : // "Lift" — a card leaving a column GROWS + fades
-                              // (lifted off the board), not shrinks-away.
-                              { opacity: 0, scale: 1.06 }
-                        }
-                        transition={
-                          reduce
-                            ? { duration: 0 }
-                            : // A deliberate, trackable lift — 0.7s on ease-in-out
-                              // (easeInOutCubic) so the fade is EVENLY paced across the
-                              // whole move and stays visible, not front-loaded like an
-                              // expo-out (which drops opacity in the first ~200ms and
-                              // still reads as a flick). Slow start, slow finish.
-                              { duration: 0.7, ease: [0.65, 0, 0.35, 1] }
-                        }
-                      >
-                        <Card
-                          ticket={t}
-                          nowMs={now}
-                          glow={moved.has(t.id) || fresh.has(t.id)}
-                          active={activeIds.has(t.id)}
-                          sessionLastActive={currentSession?.lastActive}
-                          reduce={!!reduce}
-                        />
-                      </motion.button>
-                    ))
-                  )}
-                </AnimatePresence>
-              </div>
-            </section>
+            <BoardColumn
+              key={col}
+              col={col}
+              tickets={grouped[col]}
+              now={now}
+              moved={moved}
+              fresh={fresh}
+              activeIds={activeIds}
+              sessionLastActive={currentSession?.lastActive}
+              reduce={!!reduce}
+              onSelect={setSelectedId}
+            />
           ))}
         </div>
 

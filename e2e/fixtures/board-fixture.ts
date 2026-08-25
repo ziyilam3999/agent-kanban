@@ -4,6 +4,7 @@
 // — a STATIC fixture with baked timestamps would age out and collapse a 2-lane
 // state to 1 lane. Purely a TEST input: never written to the real Vercel Blob.
 
+import { COLUMNS } from "../../lib/board-schema";
 import type { Board, Ticket } from "../../lib/board-schema";
 
 const SESSION_ID = "sess0001";
@@ -41,6 +42,17 @@ interface BuildOpts {
    * existing callers => ticket count unchanged (back-compat).
    */
   extraTodoCount?: number;
+  /**
+   * fold8-4x3-bugfix AC-3 — production-scale synthetic board (the operator's
+   * real board is ~1195 tickets / ~5.25MB, per production Blob measurement,
+   * NOT a repo file). `count` extra `todo` tickets, each with a `description`
+   * padded to `descriptionBytes` so the SERIALIZED payload reaches a target
+   * scale independent of the AC-1/AC-2 `extraTodoCount` fixture (which is
+   * comparatively tiny). Spread across every column (round-robin) so the
+   * per-column overflow + full-board reconcile cost is realistic, not just
+   * one column. Undefined => no tickets added (back-compat).
+   */
+  bigPayload?: { count: number; descriptionBytes: number };
 }
 
 /**
@@ -54,6 +66,7 @@ export function buildBoard({
   live = true,
   longSubjectTicket,
   extraTodoCount,
+  bigPayload,
 }: BuildOpts): Board {
   const now = Date.now();
   const tickets: Ticket[] = [];
@@ -126,6 +139,30 @@ export function buildBoard({
       updatedAt: now - (30 + i) * 60_000,
       sessionId: SESSION_ID,
     });
+  }
+
+  // fold8-4x3-bugfix AC-3 — production-scale filler, round-robined across all
+  // 4 columns. Uses a distinct id namespace (`9k...`) so it never collides
+  // with the live-lane (`90i`), context (`70x`), longSubject, or extraTodo
+  // (`8ddd`) id spaces above.
+  if (bigPayload && bigPayload.count > 0) {
+    const filler = "x".repeat(Math.max(0, bigPayload.descriptionBytes));
+    for (let i = 0; i < bigPayload.count; i++) {
+      const column = COLUMNS[i % COLUMNS.length];
+      const status: Ticket["status"] =
+        column === "done" ? "completed" : column === "todo" ? "pending" : "in_progress";
+      tickets.push({
+        id: `9k${i}`,
+        subject: `Production-scale fixture ticket #${i + 1} of ${bigPayload.count} — synthetic AC-3 payload-scale filler`,
+        description: filler,
+        column,
+        status,
+        blockedBy: [],
+        comments: [],
+        updatedAt: now - (60 + i) * 60_000, // old + never active
+        sessionId: SESSION_ID,
+      });
+    }
   }
 
   const ticketCount = tickets.length;

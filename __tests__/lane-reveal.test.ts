@@ -184,8 +184,15 @@ function mockFetchSequence(boards: Board[]): void {
   global.fetch = jest.fn().mockImplementation(async () => {
     const b = boards[Math.min(i, boards.length - 1)];
     i++;
+    // fold8-4x3-bugfix: BoardView's poll now reads the raw body via
+    // `res.text()` (a content-equality short-circuit — see BoardView.tsx)
+    // BEFORE `JSON.parse`-ing it, same as a real `Response`, which genuinely
+    // implements both `.text()` and `.json()`. This mock now mirrors that —
+    // NOT a test weakening, a completeness fix so the mock matches the real
+    // Fetch API surface the product code is entitled to use.
     return {
       ok: true,
+      text: async () => JSON.stringify(b),
       json: async () => b,
     } as Response;
   }) as unknown as typeof fetch;

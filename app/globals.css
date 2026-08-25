@@ -161,6 +161,17 @@ button {
   padding-bottom: 40px;
 }
 
+/* Fold8-4x3 (#fold8): the board-wrapper query container. Establishes an
+   inline-size query context for the tier rules below — an element cannot
+   query its OWN container, so the container-query tiers on `.ak-board` (a
+   descendant of `.ak-main`) are keyed off THIS element's inline size, never
+   viewport width. Unconditional (not media-scoped): harmless outside the
+   640-1023.98px grid-tier range because no `@container` rule below matches
+   there, so phone (<640) and desktop (>=1024) stay byte-for-byte unchanged. */
+.ak-main {
+  container-type: inline-size;
+}
+
 /* ------------------------------------------------------- Console header (sticky) */
 .ak-header {
   position: sticky;
@@ -289,6 +300,26 @@ button {
   line-height: 1;
   color: var(--seg);
   font-variant-numeric: tabular-nums;
+}
+
+/* Fold8-4x3 (#fold8): proportional segmented bar — the collapsed-header
+   grid-tier stand-in for the 4 fat stat tiles above (an ACTUAL meter, not 4
+   duplicated counts). Hidden by default (phone + desktop keep the full
+   tiles); shown only in the 640-1023.98px grid-tier media block below. */
+.ak-meterbar {
+  display: none;
+  align-items: stretch;
+  height: 6px;
+  gap: 2px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.ak-meterbar__seg {
+  display: block;
+  min-width: 2px;
+  background: color-mix(in srgb, var(--seg) 70%, var(--panel));
 }
 
 /* ----------------------------------------------------- Session picker */
@@ -1562,6 +1593,206 @@ button {
   font-size: 11px;
   color: var(--fg-meta);
   padding: 6px 0;
+}
+
+/* ============================================================================
+   Fold 8 (4:3 unfolded) responsive grid tiers — #fold8-4x3
+   Plan: .ai-workspace/plans/2026-08-25-fold8-4x3-responsive.md
+   Brief: docs/fold8-4x3-design-brief.md / docs/fold8-4x3-fable-critique.md
+
+   Two NEW middle tiers between the phone strip (base, unqueried, <640) and the
+   existing >=1024px desktop block below: a 640-899.98cqw 2x2 quadrant and a
+   900-1023.98cqw 4-up grid. Both stop at 1023.98 so the existing >=1024px
+   desktop block (unedited) is the ONLY thing painting >=1024px pixels — phone
+   and desktop stay byte-for-byte unchanged.
+
+   Positioned here (immediately before the existing >=1024px desktop block,
+   NOT near the base rules it overrides) DELIBERATELY: every selector below
+   (.ak-app, .ak-header, .ak-picker__btn, .ak-live, .ak-lanecount, .ak-meter,
+   .ak-strip/.ak-board, .ak-col, .ak-col__head, .ak-dots, .ak-card,
+   .ak-card__foot, .ak-lanes, .ak-drawer) already has a same-specificity BASE
+   rule earlier in this file; the CSS cascade breaks same-specificity ties by
+   SOURCE ORDER (last wins), so an override placed BEFORE its base rule is
+   silently defeated (measured: the drawer-promotion and compact-card rules
+   were first written near .ak-dots__dot--active — well before their own base
+   rules — and Playwright caught the drawer failing before this move fixed it).
+
+   Mechanism split (Note A / assumption-c): rules that target elements INSIDE
+   `.ak-main` (the query container declared above) use real `@container`
+   queries, keyed on the BOARD's own inline size — robust in split-screen,
+   where viewport width lies about the app's actual space. Rules that target
+   elements OUTSIDE `.ak-main` (the shell `.ak-app`, `.ak-header`, the meter,
+   `.ak-drawer`, `.ak-lanes`) structurally CANNOT be `@container`-scoped to
+   `.ak-main` (a container only queries its descendants) — those use `@media`
+   viewport-width, sharing the identical 640 / 900 / 1023.98 numeric
+   boundaries so they switch in lockstep with the container tiers. This is
+   safe because the board is full-bleed (`.ak-drawer` is `position:fixed` — no
+   in-flow width-stealer is introduced here), so container inline-size stays
+   ~= viewport width in every shipping configuration; execution-review should
+   re-confirm that precondition before merge (named-risk note
+   fold8-4x3-assumption-c-fullbleed-precondition).
+
+   Height guard: the 2x2 tier ALSO requires `@media (min-height: 700px)` — a
+   viewport height condition AND-ed with the width container query (assumption
+   (b)'s sanctioned alternative), NOT `container-type: size` on `.ak-main`.
+   `container-type: size` is never used anywhere in this file, so the 0-height
+   collapse trap (named-risk note fold8-4x3-container-size-height-collapse) is
+   structurally avoided — `.ak-board`'s real height instead comes from the
+   ordinary flex/grid box chain below (.ak-app 100dvh grid -> .ak-main flex
+   column -> .ak-board flex:1 1 auto), never from size containment. */
+
+@media (min-width: 640px) and (max-width: 1023.98px) {
+  /* ---- 100dvh shell: header auto / board 1fr, per-column scroll enabler ---- */
+  .ak-app {
+    height: 100dvh;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    /* Note C: neutralize the base 40px bottom pad so it doesn't silently
+       shorten the 1fr board row. */
+    padding-bottom: 0;
+    overflow: hidden;
+  }
+
+  .ak-main {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .ak-board {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* ---- Collapsed one-row header (design brief §4) ---- */
+  .ak-header {
+    padding: 5px 14px 4px;
+  }
+
+  .ak-picker__btn {
+    padding: 3px 8px;
+  }
+
+  .ak-live,
+  .ak-lanecount {
+    padding: 3px 7px;
+  }
+
+  /* Full stat tiles -> the proportional segmented bar (an ACTUAL meter). */
+  .ak-meter {
+    display: none;
+  }
+
+  .ak-meterbar {
+    display: flex;
+    margin: 4px 0 0;
+  }
+
+  /* #1456 re-derived clearance: the collapsed header is <=48px (AC-3) in both
+     grid tiers, so a flat 48px scroll-margin is always >= the rendered
+     header height without needing a second tier-specific value. */
+  .ak-lanes {
+    scroll-margin-top: 48px;
+  }
+}
+
+/* ---- 2x2 quadrant tier: 640-899.98cqw AND viewport height >= 700px ---- */
+@media (min-height: 700px) {
+  @container (min-width: 640px) and (max-width: 899.98px) {
+    .ak-board {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      grid-template-rows: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      padding: 14px 14px 4px;
+    }
+
+    .ak-col {
+      overflow-y: auto;
+      min-height: 0;
+    }
+
+    .ak-col__head {
+      top: 0;
+      z-index: 1;
+      background: var(--ink);
+    }
+
+    .ak-dots {
+      display: none;
+    }
+
+    /* Compact card variant (design brief §5): ~20% less vertical padding.
+       Subject is already 2-line-clamped and the footer already single-line
+       in the base `.ak-card` rules — no further change needed for those. */
+    .ak-card {
+      padding: 9px 10px 8px 14px;
+    }
+
+    .ak-card__foot {
+      margin-top: 7px;
+    }
+  }
+}
+
+/* ---- 4-up tier: 900-1023.98cqw, width-only (no height guard) ---- */
+@container (min-width: 900px) and (max-width: 1023.98px) {
+  .ak-board {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    gap: 12px;
+    padding: 14px 14px 4px;
+  }
+
+  .ak-col {
+    overflow-y: auto;
+    min-height: 0;
+  }
+
+  .ak-col__head {
+    top: 0;
+    z-index: 1;
+    background: var(--ink);
+  }
+
+  .ak-dots {
+    display: none;
+  }
+
+  .ak-card {
+    padding: 9px 10px 8px 14px;
+  }
+
+  .ak-card__foot {
+    margin-top: 7px;
+  }
+}
+
+/* ---- Drawer promoted to a side panel at the 4-up tier (design brief §7) ----
+   900-1023.98cqw only: >=1024px picks this up again via the existing desktop
+   block right below (identical geometry — no visual seam at the 1024
+   boundary). The 640-899.98 2x2 tier keeps the base bottom-sheet drawer
+   untouched. MUST come after the base `.ak-drawer` rule above (same
+   specificity — later source order wins the cascade). */
+@media (min-width: 900px) and (max-width: 1023.98px) {
+  .ak-drawer {
+    left: auto;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: min(440px, 92vw);
+    max-height: 100dvh;
+    border-radius: 0;
+    border-left: 1px solid var(--line);
+    border-top: none;
+  }
+
+  .ak-drawer__grip {
+    display: none;
+  }
 }
 
 /* ------------------------------------------------- Desktop (>=1024px): 4-up */

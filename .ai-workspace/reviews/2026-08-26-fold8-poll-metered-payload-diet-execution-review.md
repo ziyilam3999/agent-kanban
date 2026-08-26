@@ -7,7 +7,7 @@ Binary AC below was verified BY EXECUTION in an isolated worktree checked out fr
 from the executor's self-report. Reviewed at PR #76 head `be6882db1f63640f08f2e169c192616183a92c96`
 (== `origin/fold8-poll-metered-payload-diet`), base master, mergeStateStatus CLEAN.
 
-Worktree: `/Users/ansonlam/coding_projects/agent-kanban/.claude/worktrees/fold8-poll-metered-payload-diet`
+Worktree: `.claude/worktrees/fold8-poll-metered-payload-diet` (repo-relative)
 (head SHA re-verified == be6882db BEFORE this verdict commit was appended).
 
 ## Binary AC — verified by execution

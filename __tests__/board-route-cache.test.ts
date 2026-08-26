@@ -19,7 +19,7 @@ describe("GET /api/board — CDN cache header (#1138 origin-transfer cut)", () =
   });
 
   it("responds with a public s-maxage CDN cache, NOT no-store", async () => {
-    const res = await GET();
+    const res = await GET(new Request("http://localhost/api/board"));
     const cc = res.headers.get("Cache-Control") ?? "";
     expect(cc).toContain(`s-maxage=${CDN_SMAXAGE}`);
     expect(cc).toContain("public");

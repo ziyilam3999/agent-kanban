@@ -1662,10 +1662,20 @@ button {
    phone control — a general fallback via the tiers' existing gates, not a
    new fixture-specific number. The collapsed-header/meterbar/lanes cosmetics
    below are unchanged and stay on the full unconditional 640-1023.98 band
-   (pure chrome, no scroll impact). */
+   (pure chrome, no scroll impact).
+
+   REDESIGN (fold8-uiux-redesign, D1/AC-1): a THIRD OR-arm added for the new
+   768-899.98cqw landscape-gated 4-up extension (below, ~L1767+) — that tier
+   has NO height gate by design, so it can be active at heights the 2x2
+   tier's own >=700 arm would miss (e.g. 890x660, the operator's red repro).
+   Without this arm the shell clamp would stay off at those cells even though
+   a grid tier IS active underneath it, recreating exactly the PR #74 dead
+   zone this comment already warns about ("must track exactly the cells
+   where a grid tier is active"). */
 @media
   (min-width: 900px) and (max-width: 1023.98px),
-  (min-width: 640px) and (max-width: 899.98px) and (min-height: 700px) {
+  (min-width: 640px) and (max-width: 899.98px) and (min-height: 700px),
+  (min-width: 768px) and (max-width: 899.98px) and (orientation: landscape) {
   /* ---- 100dvh shell: header auto / board 1fr, per-column scroll enabler ---- */
   .ak-app {
     height: 100dvh;
@@ -1746,19 +1756,104 @@ button {
       background: var(--ink);
     }
 
+    /* D2 hierarchy (redesign): the quadrant head is the anchor a reader
+       orients by — step it up from the 11.5px base. */
+    .ak-col__name {
+      font-size: 12.5px;
+    }
+
     .ak-dots {
       display: none;
     }
 
-    /* Compact card variant (design brief §5): ~20% less vertical padding.
-       Subject is already 2-line-clamped and the footer already single-line
-       in the base `.ak-card` rules — no further change needed for those. */
+    /* REDESIGN (D2/D3, fold8-uiux-redesign): the old ~20% compact card
+       padding fought portrait's own abundance of vertical space (that's
+       exactly the density complaint) — deliberately REVERTED here so
+       `.ak-card`/`.ak-card__foot` fall through to the base (non-compact)
+       rules earlier in this file (AC-2(b)(4): padding >= base). Landscape
+       keeps its own compact variant below (out of scope for this AC — see
+       plan D3, "kept exactly as-is" does not list padding). */
+
+    /* D3 glance card: pips + model pill are texture/illegible at this
+       reading distance and are retired from the card (the drawer keeps
+       both, AC-2(c)) — subject becomes the sole anchor, promoted to >=14px. */
+    .ak-pips {
+      display: none;
+    }
+
+    .ak-model {
+      display: none;
+    }
+
+    .ak-card__subject {
+      font-size: 14px;
+    }
+  }
+}
+
+/* ---- Landscape 4-up extension: 768-899.98cqw, orientation:landscape, NO
+   height gate (D1/AC-1) ----
+   The width-only 900-1023.98cqw 4-up tier below never reaches the real
+   Fold-8-open landscape canvas (~890x630-670) — probe-proven RED at
+   890x660/840x660/768x650 (plan ground truth). D1 commits landscape to
+   ALWAYS be a true 4-up, never the 2x2 above, with no height precondition —
+   so this block widens the 4-up floor down to 768cqw for LANDSCAPE-shaped
+   canvases only (portrait widths in the same 640-899.98 band are untouched
+   — the 2x2 tier above still owns those whenever height>=700).
+
+   #1590 monotonicity: at a landscape cell with height>=700 (e.g. 890x750),
+   BOTH this rule and the 2x2 rule above are simultaneously true (2x2's own
+   gate has no orientation guard). Same specificity on every selector below
+   -> the CSS cascade breaks the tie by SOURCE ORDER, so this block is placed
+   AFTER the 2x2 tier block ABOVE on purpose: landscape-4-up (the stronger,
+   committed claim — D1 explicitly rejects 2x2 in landscape) always wins.
+   AC-1(a)'s one-row assertion (gridTemplateRows=1) is the mechanical catch
+   if this ordering is ever broken. */
+@media (orientation: landscape) {
+  @container (min-width: 768px) and (max-width: 899.98px) {
+    .ak-board {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      grid-template-rows: minmax(0, 1fr);
+      gap: 12px;
+      padding: 14px 14px 4px;
+    }
+
+    .ak-col {
+      overflow-y: auto;
+      min-height: 0;
+    }
+
+    .ak-col__head {
+      top: 0;
+      z-index: 1;
+      background: var(--ink);
+    }
+
+    .ak-dots {
+      display: none;
+    }
+
     .ak-card {
       padding: 9px 10px 8px 14px;
     }
 
     .ak-card__foot {
       margin-top: 7px;
+    }
+
+    /* D3 glance card (same as the 2x2 tier above + the existing 900-1023.98
+       4-up below): pips + model pill retired from the card, subject >=14px. */
+    .ak-pips {
+      display: none;
+    }
+
+    .ak-model {
+      display: none;
+    }
+
+    .ak-card__subject {
+      font-size: 14px;
     }
   }
 }
@@ -1794,6 +1889,21 @@ button {
 
   .ak-card__foot {
     margin-top: 7px;
+  }
+
+  /* D3 glance card (fold8-uiux-redesign) — same treatment as the
+     768-899.98 landscape extension above: pips + model pill retired from
+     the card, subject promoted to >=14px. */
+  .ak-pips {
+    display: none;
+  }
+
+  .ak-model {
+    display: none;
+  }
+
+  .ak-card__subject {
+    font-size: 14px;
   }
 }
 

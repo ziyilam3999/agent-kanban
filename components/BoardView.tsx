@@ -94,6 +94,12 @@ export function BoardView({ initial }: { initial: Board }) {
   // to any fixture) before parsing/diffing/setting state; an identical tick
   // short-circuits to a true no-op.
   const lastRawBoardRef = useRef<string | null>(null);
+  // fold8-poll-metered-payload-diet: last-seen ETag validator from /api/board,
+  // presented as `If-None-Match` on every subsequent poll. When the server
+  // confirms "unchanged" via `304`, the body transfer is near-zero bytes — the
+  // remaining large metered-cost lever beyond the #1138 edge cache (which still
+  // shipped the FULL body on every poll that reached it, changed or not).
+  const lastEtagRef = useRef<string | null>(null);
   // Latest selected-session id, readable inside the (deps-empty) poll closure.
   const currentSessionIdRef = useRef<string | undefined>(undefined);
   const stripRef = useRef<HTMLDivElement>(null);
@@ -114,13 +120,40 @@ export function BoardView({ initial }: { initial: Board }) {
       // looking at. We refresh immediately when it becomes visible again (below).
       if (typeof document !== "undefined" && document.hidden) return;
       try {
-        const res = await fetch("/api/board", { cache: "no-store" });
+        // Present the last-seen validator so an unchanged board answers `304`
+        // with an EMPTY body (near-zero metered bytes) instead of re-shipping
+        // the full ~5.5 MB snapshot every 5s.
+        const headers: Record<string, string> = {};
+        if (lastEtagRef.current) {
+          headers["If-None-Match"] = lastEtagRef.current;
+        }
+        const res = await fetch("/api/board", { cache: "no-store", headers });
+        if (!alive) return;
+
+        // Server-confirmed no-op: skip parse + diff + setBoard + glow
+        // entirely. NRN-1: `now` STILL advances so the active-heartbeat
+        // window (lib/active.ts) and every Card's relative-time label keep
+        // ticking during idle stretches — a frozen clock on a 304 would be a
+        // real VISUAL idle-state change, quietly falsifying the
+        // `ui_gate_skip` "no visual change" reason this task ships under.
+        if (res.status === 304) {
+          setNow(Date.now());
+          return;
+        }
         if (!res.ok) return;
+
+        const etag = res.headers.get("ETag");
+        if (etag) lastEtagRef.current = etag;
+
         const rawText = await res.text();
         if (!alive) return;
-        // Unchanged payload -> true no-op: skip parse + diff + setState
-        // entirely (no setBoard, no setNow, zero re-render this tick).
-        if (rawText === lastRawBoardRef.current) return;
+        // Defensive belt-and-suspenders (not the primary no-op path anymore):
+        // an identical body without a matching 304 — still a true no-op, and
+        // still must NOT freeze `now` for the same NRN-1 reason above.
+        if (rawText === lastRawBoardRef.current) {
+          setNow(Date.now());
+          return;
+        }
         lastRawBoardRef.current = rawText;
         const next: Board = JSON.parse(rawText);
 

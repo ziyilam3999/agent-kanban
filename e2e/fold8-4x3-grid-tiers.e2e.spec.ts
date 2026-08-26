@@ -77,7 +77,7 @@ async function gridTracks(page: Page, selector: string) {
 }
 
 test.describe("Fold8 4:3 — AC-0 container-query smoke (tier switches in ONE session)", () => {
-  test("CSS.supports(container-type:inline-size)===true AND .ak-board switches 4-track<->2-track across a live viewport resize", async ({
+  test("CSS.supports(container-type:inline-size)===true AND .ak-board switches 4-up grid <-> 2-up paged flex strip across a live viewport resize", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1000, height: 750 });
@@ -99,10 +99,20 @@ test.describe("Fold8 4:3 — AC-0 container-query smoke (tier switches in ONE se
     // frame for React/Motion effects that may re-run on viewport change.
     await page.waitForTimeout(150);
 
+    // fold8-portrait-2col-paging (P1/P5): portrait is now a 2-up PAGED flex
+    // strip (real horizontal overflow + scroll-snap), not a 2x2 CSS grid —
+    // `gridTemplateColumns`/`Rows` correctly compute to "none" (colCount/
+    // rowCount 0) under `display:flex`. Assert the tier actually switched:
+    // display flips to flex AND real horizontal overflow appears.
     const portrait = await gridTracks(page, ".ak-board");
-    expect(portrait.display).toBe("grid");
-    expect(portrait.colCount).toBe(2);
-    expect(portrait.rowCount).toBe(2);
+    expect(portrait.display).toBe("flex");
+    expect(portrait.colCount).toBe(0);
+    expect(portrait.rowCount).toBe(0);
+    const portraitOverflow = await page.locator(".ak-board").evaluate((el) => ({
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+    }));
+    expect(portraitOverflow.scrollWidth).toBeGreaterThan(portraitOverflow.clientWidth + 4);
   });
 });
 
@@ -146,17 +156,23 @@ test.describe("Fold8 4:3 — AC-1 landscape 4-up (1000x750)", () => {
   });
 });
 
-test.describe("Fold8 4:3 — AC-2 portrait 2x2 + independent column scroll (750x1000)", () => {
-  test("2x2 grid, TODO column independently scrollable, page does not scroll + screenshot", async ({
+test.describe("Fold8 4:3 — AC-2 portrait 2-up paged (superseded 2x2) + independent column scroll (750x1000)", () => {
+  test("2-up flex strip (not a grid), TODO column independently scrollable, page does not scroll + screenshot", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 750, height: 1000 });
     await loadFold8Board(page);
 
+    // fold8-portrait-2col-paging: portrait is a 2-up PAGED flex strip now
+    // (real h-overflow + scroll-snap), not a 2x2 CSS grid — see
+    // fold8-portrait-2col-paging.e2e.spec.ts's AC-1 for the full
+    // geometry/paging/dots contract. This test keeps only the two
+    // assertions that were always ITS OWN (not superseded): the tier
+    // actually switched off `display:grid`, and TODO's independent scroll.
     const tracks = await gridTracks(page, ".ak-board");
-    expect(tracks.display).toBe("grid");
-    expect(tracks.colCount).toBe(2);
-    expect(tracks.rowCount).toBe(2);
+    expect(tracks.display).toBe("flex");
+    expect(tracks.colCount).toBe(0);
+    expect(tracks.rowCount).toBe(0);
 
     // TODO is the first `.ak-col` (COLUMNS order: todo, in_progress, in_review, done).
     const todoCol = page.locator(".ak-col").first();
@@ -172,7 +188,7 @@ test.describe("Fold8 4:3 — AC-2 portrait 2x2 + independent column scroll (750x
     // below mutates TODO's scrollTop — a clean canonical capture for the
     // ui-evolve vision judge, not a mid-scroll frame.
     await page.screenshot({
-      path: path.join(SCREENS, "750x1000-portrait-2x2.png"),
+      path: path.join(SCREENS, "750x1000-portrait-2up-paged.png"),
       fullPage: false,
     });
 

@@ -5,22 +5,56 @@
 // state to 1 lane. Purely a TEST input: never written to the real Vercel Blob.
 
 import { COLUMNS } from "../../lib/board-schema";
-import type { Board, Ticket } from "../../lib/board-schema";
+import type { Board, LedgerComment, Ticket } from "../../lib/board-schema";
 
 const SESSION_ID = "sess0001";
 
 // The 4-role pipeline in execution order — a lane's current stage = highest index present.
 type Role = "planner" | "plan-review" | "executor" | "execution-review";
 const ROLE_ORDER: Role[] = ["planner", "plan-review", "executor", "execution-review"];
+// Mirrors lib/ui-meta.ts WORK_PIPELINE_ROLES — the exact role set cardModel()
+// scans backward for on an in_progress ticket. Kept as a local literal (not an
+// import) so this fixture never depends on app source for its own shape.
+const WORK_ROLES = new Set<Role>(["planner", "executor"]);
 
-function comments(upTo: number, baseTs: number) {
-  return ROLE_ORDER.slice(0, upTo + 1).map((role, i) => ({
+/**
+ * fold8-uiux-redesign AC-2(b)(2) — the model/effort provenance pill (`.ak-model`)
+ * renders on a card ONLY when the ticket's current-actor comment (the newest
+ * planner/executor comment for an in_progress ticket — lib/ui-meta.ts cardModel)
+ * carries `modelVersion`. The baseline fixture never set this field, so `.ak-model`
+ * count was unconditionally 0 across the WHOLE suite — the removal AC could not
+ * be captured as RED evidence (plan-review Round-1 R1). `opts.modelVersion` lets a
+ * caller opt a SPECIFIC lane's comment set into carrying real provenance; every
+ * existing caller that omits it is byte-for-byte unaffected (back-compat).
+ */
+function comments(
+  upTo: number,
+  baseTs: number,
+  opts?: { modelVersion?: string; effort?: string },
+): LedgerComment[] {
+  const list: LedgerComment[] = ROLE_ORDER.slice(0, upTo + 1).map((role, i) => ({
     role,
     ts: new Date(baseTs + i * 1000).toISOString(),
     agentId: `agent-${role}-${i}`,
     artifact: `${role}.md`,
     ...(role.endsWith("review") ? { verdict: "APPROVE" } : {}),
   }));
+  if (opts?.modelVersion) {
+    // Attach to the NEWEST work-role comment, not blindly the last comment —
+    // cardModel stops at the first planner/executor match scanning from the
+    // end, so any other position would silently fail to render the pill.
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (WORK_ROLES.has(list[i].role as Role)) {
+        list[i] = {
+          ...list[i],
+          modelVersion: opts.modelVersion,
+          ...(opts.effort ? { effort: opts.effort } : {}),
+        };
+        break;
+      }
+    }
+  }
+  return list;
 }
 
 interface BuildOpts {
@@ -53,6 +87,16 @@ interface BuildOpts {
    * one column. Undefined => no tickets added (back-compat).
    */
   bigPayload?: { count: number; descriptionBytes: number };
+  /**
+   * fold8-uiux-redesign AC-2(b)(2) — when set (and `liveLanes >= 1`), lane 0's
+   * comment set carries real `modelVersion` (+ `effort`) provenance so
+   * `.ak-model` genuinely renders on that card (see `comments()` above).
+   * Lane 0 always stages at `i % ROLE_ORDER.length === 0` ("planner"), a
+   * WORK_ROLES member by construction, so this is always attachable when
+   * `liveLanes >= 1`. Undefined => no card carries modelVersion (back-compat:
+   * every existing caller sees `.ak-model` count 0, exactly as before).
+   */
+  modelPill?: { version: string; effort?: string };
 }
 
 /**
@@ -67,6 +111,7 @@ export function buildBoard({
   longSubjectTicket,
   extraTodoCount,
   bigPayload,
+  modelPill,
 }: BuildOpts): Board {
   const now = Date.now();
   const tickets: Ticket[] = [];
@@ -81,7 +126,11 @@ export function buildBoard({
       column: "in_progress",
       status: "in_progress",
       blockedBy: [],
-      comments: comments(stage, now - 60_000 - i * 5_000),
+      comments: comments(
+        stage,
+        now - 60_000 - i * 5_000,
+        i === 0 ? modelPill && { modelVersion: modelPill.version, effort: modelPill.effort } : undefined,
+      ),
       updatedAt: now - i * 2_000, // all within the 8-min active window
       sessionId: SESSION_ID,
     });

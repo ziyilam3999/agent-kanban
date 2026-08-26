@@ -68,6 +68,14 @@ export function BoardView({ initial }: { initial: Board }) {
   const [moved, setMoved] = useState<Set<string>>(new Set());
   const [fresh, setFresh] = useState<Set<string>>(new Set());
   const [activeCol, setActiveCol] = useState(0);
+  // fold8-portrait-2col-paging (P1/P3(ii)): how many `.ak-col`s are visible
+  // at once in the CURRENT tier — 1 on the phone strip (unchanged default),
+  // 2 in the portrait 2-up paged tier, 4 where every tier fits all columns
+  // (dots stay hidden there so this value is moot). `activeCol` now means
+  // "index of the first visible column" (the page start), not "the one
+  // active column" — on the phone tier visibleCols stays 1 so the two
+  // notions coincide and existing phone behavior is unchanged.
+  const [visibleCols, setVisibleCols] = useState(1);
   // #1456: true for the one-shot Live Swimlanes arrival cue (`ak-lanes--arrive`).
   const [arrive, setArrive] = useState(false);
 
@@ -280,19 +288,50 @@ export function BoardView({ initial }: { initial: Board }) {
     };
   }, [lanes.length, selectedId, reduce]);
 
+  // fold8-portrait-2col-paging: `visibleCount` is however many `.ak-col`s
+  // fit in the strip's own visible width at the CURRENT tier — derived from
+  // real layout (clientWidth/scrollWidth), never a tier name, so it stays
+  // correct across the phone (1), portrait 2-up (2), and any tier where all
+  // 4 fit (4, though dots are hidden there so it's moot). `start` is the
+  // page-start index the strip is currently resting on/nearest to.
   const onStripScroll = useCallback(() => {
     const el = stripRef.current;
     if (!el) return;
     const per = el.scrollWidth / COLUMNS.length;
+    if (!(per > 0)) return;
+    const rawVisible = Math.floor(el.clientWidth / per);
+    const visible = Math.max(1, Math.min(COLUMNS.length, rawVisible));
     const idx = Math.round(el.scrollLeft / per);
-    setActiveCol(Math.max(0, Math.min(COLUMNS.length - 1, idx)));
+    const start = Math.max(0, Math.min(COLUMNS.length - visible, idx));
+    setVisibleCols(visible);
+    setActiveCol(start);
   }, []);
 
+  // Recompute on mount (before any scroll event fires, so the initial dots
+  // pair-light correctly) and on resize/orientation change (a fold-open
+  // transition can change the tier without necessarily firing a scroll
+  // event on the strip itself).
+  useEffect(() => {
+    onStripScroll();
+    window.addEventListener("resize", onStripScroll);
+    window.addEventListener("orientationchange", onStripScroll);
+    return () => {
+      window.removeEventListener("resize", onStripScroll);
+      window.removeEventListener("orientationchange", onStripScroll);
+    };
+  }, [onStripScroll]);
+
+  // Jump to the PAGE containing column `i` (assumption #3) — on the phone
+  // tier visibleCols is 1 so this reduces to the prior per-column behavior
+  // unchanged; in the portrait 2-up tier a tap on either dot of a pair
+  // lands the same page start.
   function scrollToCol(i: number) {
     const el = stripRef.current;
     if (!el) return;
     const per = el.scrollWidth / COLUMNS.length;
-    el.scrollTo({ left: per * i, behavior: reduce ? "auto" : "smooth" });
+    const visible = Math.max(1, visibleCols);
+    const pageStart = Math.floor(i / visible) * visible;
+    el.scrollTo({ left: per * pageStart, behavior: reduce ? "auto" : "smooth" });
   }
 
   const selectedTicket = selectedId
@@ -363,19 +402,29 @@ export function BoardView({ initial }: { initial: Board }) {
         </div>
 
         <div className="ak-dots" role="tablist" aria-label="jump to column">
-          {COLUMNS.map((col, i) => (
-            <button
-              key={col}
-              type="button"
-              role="tab"
-              aria-selected={activeCol === i}
-              aria-label={COLUMN_LABELS[col]}
-              className={`ak-dots__dot${
-                activeCol === i ? " ak-dots__dot--active" : ""
-              }`}
-              onClick={() => scrollToCol(i)}
-            />
-          ))}
+          {COLUMNS.map((col, i) => {
+            // fold8-portrait-2col-paging (P3(ii)/assumption #3): the VISUAL
+            // pair-marker (both dots in the active page lit) is distinct
+            // from the single LOGICAL tab selection (exactly one
+            // aria-selected=true, the page's first column) — keeps the
+            // dots' tablist a11y contract sane while still showing "you're
+            // on columns 1-2 of 4" at a glance. On the phone tier
+            // visibleCols is 1 so the two notions coincide (unchanged
+            // behavior: exactly 1 active dot, AC-6's 390x844 hold-out).
+            const isVisible = i >= activeCol && i < activeCol + visibleCols;
+            const isSelected = i === activeCol;
+            return (
+              <button
+                key={col}
+                type="button"
+                role="tab"
+                aria-selected={isSelected}
+                aria-label={COLUMN_LABELS[col]}
+                className={`ak-dots__dot${isVisible ? " ak-dots__dot--active" : ""}`}
+                onClick={() => scrollToCol(i)}
+              />
+            );
+          })}
         </div>
       </main>
 

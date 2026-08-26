@@ -269,51 +269,50 @@ test.describe("AC-1(a)+(b) & AC-3(d) — landscape one-row 4-up, real-touch reac
 });
 
 // ---------------------------------------------------------------------------
-// AC-2(a)+(b) — portrait 2x2 geometry + the 5 density deltas.
+// AC-2(a)+(b) — portrait 2-col PAGED geometry (superseded 2x2, see
+// fold8-portrait-2col-paging.e2e.spec.ts's own AC-1 for the full paging/
+// swipe/dots contract — this block keeps the geometry+density arms LOCAL to
+// this file's existing loadDeepBoard/densityDeltas fixtures) + the 5 density
+// deltas (AC-5's vehicle — unchanged mechanism, still valid on the new tier).
 // ---------------------------------------------------------------------------
 
-function overlaps(a: BoardBox, b: BoardBox): boolean {
-  return !(
-    a.x + a.width <= b.x ||
-    b.x + b.width <= a.x ||
-    a.y + a.height <= b.y ||
-    b.y + b.height <= a.y
-  );
-}
-
-function within(inner: BoardBox, outer: BoardBox, slack = 2): boolean {
-  return (
-    inner.x >= outer.x - slack &&
-    inner.y >= outer.y - slack &&
-    inner.x + inner.width <= outer.x + outer.width + slack &&
-    inner.y + inner.height <= outer.y + outer.height + slack
-  );
-}
-
-async function assertPortraitGeometry(page: Page) {
+/** AC-1(a)/(b): exactly 2 fully-visible `.ak-col`s (42-52% width, >=300px),
+ *  real horizontal overflow, and all 4 columns share one row. Same shape as
+ *  this file's own `oneRowFourUp` helper above, generalized off the "4
+ *  fully visible" landscape assumption to "2 fully visible" for the portrait
+ *  paged tier. */
+async function twoUpPagedGeometry(page: Page, width: number) {
   const cols = page.locator(".ak-col");
   await expect(cols).toHaveCount(4);
-  const boardBox = await page.locator(".ak-board").boundingBox();
-  expect(boardBox).not.toBeNull();
-
   const boxes: BoardBox[] = [];
   for (let i = 0; i < 4; i++) {
     const b = await cols.nth(i).boundingBox();
     expect(b).not.toBeNull();
     boxes.push(b!);
   }
-  for (let i = 0; i < boxes.length; i++) {
-    for (let j = i + 1; j < boxes.length; j++) {
-      expect(overlaps(boxes[i], boxes[j])).toBe(false);
-    }
+  const fullyVisible = boxes
+    .map((b, i) => ({ i, b }))
+    .filter(({ b }) => b.x >= -1 && b.x + b.width <= width + 1);
+  expect(fullyVisible.length).toBe(2);
+  expect(fullyVisible.map(({ i }) => i).sort((a, b) => a - b)).toEqual([0, 1]);
+
+  const metrics = await page.locator(".ak-board").evaluate((el) => ({
+    clientWidth: el.clientWidth,
+    scrollWidth: el.scrollWidth,
+  }));
+  expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth + 4);
+  for (const { b } of fullyVisible) {
+    const frac = b.width / metrics.clientWidth;
+    expect(frac).toBeGreaterThanOrEqual(0.42);
+    expect(frac).toBeLessThanOrEqual(0.52);
+    expect(b.width).toBeGreaterThanOrEqual(300);
   }
-  for (const b of boxes) {
-    expect(within(b, boardBox!)).toBe(true);
-  }
-  const xs = Array.from(new Set(boxes.map((b) => Math.round(b.x / 4) * 4)));
-  const ys = Array.from(new Set(boxes.map((b) => Math.round(b.y / 4) * 4)));
-  expect(xs.length).toBe(2);
-  expect(ys.length).toBe(2);
+
+  const ys = boxes.map((b) => b.y);
+  const ySpread = Math.max(...ys) - Math.min(...ys);
+  const cardBox = await page.locator(".ak-cardbtn").first().boundingBox();
+  const cardH = cardBox ? cardBox.height : 40;
+  expect(ySpread).toBeLessThan(cardH);
 }
 
 const PORTRAIT_CELLS = [
@@ -321,13 +320,13 @@ const PORTRAIT_CELLS = [
   { width: 672, height: 850 },
 ];
 
-test.describe("AC-2(a)+(b) — portrait geometry + 5 density deltas + real per-column scroll", () => {
+test.describe("AC-2(a)+(b) — portrait paged geometry + 5 density deltas + real per-column scroll", () => {
   for (const { width, height } of PORTRAIT_CELLS) {
-    test(`${width}x${height}: 2x2 non-overlapping grid, pips=0, model-pill=0, subject>=14px, padding>=base, col-name>=12.5px`, async ({
+    test(`${width}x${height}: 2-col page (not 2x2), pips=0, model-pill=0, subject>=14px, padding>=base, col-name>=12.5px`, async ({
       page,
     }) => {
       await loadDeepBoard(page, width, height);
-      await assertPortraitGeometry(page);
+      await twoUpPagedGeometry(page, width);
 
       const d = await densityDeltas(page);
       expect(d.pipsVisible).toBe(0);

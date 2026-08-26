@@ -68,6 +68,77 @@ export async function swipeUp(
 }
 
 /**
+ * Drive one continuous touchStart -> touchMove* -> touchEnd sequence at a
+ * fixed y, moving HORIZONTALLY by `dx` over `steps` frames. `dx < 0` = swipe
+ * LEFT (finger moves right-to-left; the natural "advance to the next page"
+ * gesture — increases `scrollLeft`). `dx > 0` = swipe RIGHT (decreases
+ * `scrollLeft`). Mirrors `touchDragAt` above but for the x axis — added for
+ * fold8-portrait-2col-paging's real horizontal-paging spec (AC-2); the
+ * PR-branch fold8-scroll-reachability spec hand-rolled an equivalent
+ * one-off CDP sequence inline before this fixture existed.
+ */
+export async function touchDragHorizontalAt(
+  page: Page,
+  opts: { xStart: number; y: number; dx: number; steps?: number; stepDelayMs?: number },
+) {
+  const { xStart, y, dx, steps = 15, stepDelayMs = 16 } = opts;
+  const client = await page.context().newCDPSession(page);
+  try {
+    await client.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x: xStart, y }],
+    });
+    for (let i = 1; i <= steps; i++) {
+      const x = xStart + (dx * i) / steps;
+      await client.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x, y }],
+      });
+      await page.waitForTimeout(stepDelayMs);
+    }
+    await client.send("Input.dispatchTouchEvent", {
+      type: "touchEnd",
+      touchPoints: [],
+    });
+  } finally {
+    await client.detach().catch(() => {});
+  }
+}
+
+/**
+ * Swipe LEFT (finger travels from `xStartFrac` to a point `distFrac` further
+ * left, both fractions of viewport width) at vertical position `yFrac`
+ * (fraction of viewport height) — the "advance to the next page" gesture.
+ * Returns nothing — callers re-measure state after calling this.
+ */
+export async function swipeLeft(
+  page: Page,
+  opts: { yFrac?: number; xStartFrac?: number; distFrac?: number; steps?: number },
+) {
+  const vp = page.viewportSize();
+  if (!vp) throw new Error("swipeLeft: no viewport size");
+  const { yFrac = 0.5, xStartFrac = 0.85, distFrac = 0.7, steps = 15 } = opts;
+  const y = vp.height * yFrac;
+  const xStart = vp.width * xStartFrac;
+  const dx = -Math.round(vp.width * distFrac);
+  await touchDragHorizontalAt(page, { xStart, y, dx, steps });
+}
+
+/** Reverse of `swipeLeft` — the "go back to the previous page" gesture. */
+export async function swipeRight(
+  page: Page,
+  opts: { yFrac?: number; xStartFrac?: number; distFrac?: number; steps?: number },
+) {
+  const vp = page.viewportSize();
+  if (!vp) throw new Error("swipeRight: no viewport size");
+  const { yFrac = 0.5, xStartFrac = 0.15, distFrac = 0.7, steps = 15 } = opts;
+  const y = vp.height * yFrac;
+  const xStart = vp.width * xStartFrac;
+  const dx = Math.round(vp.width * distFrac);
+  await touchDragHorizontalAt(page, { xStart, y, dx, steps });
+}
+
+/**
  * Read the scrollTop of every ancestor of `el` (matched by `selector`) PLUS
  * window.scrollY, as a flat array walked from the element up to <html>. This
  * is the GENERIC "which element (if any) scrolled" probe — deliberately NOT

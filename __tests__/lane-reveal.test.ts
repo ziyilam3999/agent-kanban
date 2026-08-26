@@ -190,11 +190,20 @@ function mockFetchSequence(boards: Board[]): void {
     // implements both `.text()` and `.json()`. This mock now mirrors that —
     // NOT a test weakening, a completeness fix so the mock matches the real
     // Fetch API surface the product code is entitled to use.
+    //
+    // fold8-poll-metered-payload-diet: BoardView's poll now also reads
+    // `res.status` (304 detection) and `res.headers.get("ETag")` — a genuine
+    // `Response` always has both, so this mock completes them too (no
+    // `If-None-Match` handling needed here: this suite never sends a
+    // conditional request that the real route would 304, so every call is a
+    // fresh 200 with no prior ETag).
     return {
       ok: true,
+      status: 200,
+      headers: { get: () => null },
       text: async () => JSON.stringify(b),
       json: async () => b,
-    } as Response;
+    } as unknown as Response;
   }) as unknown as typeof fetch;
 }
 

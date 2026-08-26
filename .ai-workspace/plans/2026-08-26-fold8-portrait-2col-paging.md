@@ -173,3 +173,16 @@ Mutual-exclusion / clear-list arms in the intended diff: (1) new-portrait-2up vs
 
 <!-- plan-review verdict: PASS — Round 1 (full adversarial) — reviewer: cc-plan-review (Agent-tool fallback dispatch, [route-dispatch-fallback-ok]) — 2026-08-26 -->
 plan-review: PASS (Round 1)
+
+## Execution Review
+
+**Decision: PASS** — reviewer: execution-review role (stateless, adversarial; did NOT author this plan or the diff). Full verdict artifact: `.ai-workspace/reviews/fold8-portrait-2col-paging-execution-review.md` (committed to this PR-head branch). Reviewed PR #75 head `1b6e8c1` in its own PR-head worktree.
+
+- **Landscape 4-up = BYTE-IDENTICAL to the approved `1b5bac3`.** The "Landscape 4-up extension → EOF" 189-line block extracted from both commits `diff`s empty (exit 0); it shifted +55 lines with zero internal change; the whole `globals.css` +55 growth is in the portrait tier. The `globals.css` `1b5bac3→1b6e8c1` diff touches only the portrait shell-clamp arm + the retired-2×2→portrait-2up tier; no `repeat(4,…)` landscape rule changed. AC-6 landscape sweep GREEN confirms live. Executor's "landscape byte-identical" claim VERIFIED.
+- **Portrait oracle independently re-reproduced (my own numbers, not the executor's):** GREEN at head = `fold8-portrait-2col-paging.e2e.spec.ts` **11/11 pass (41.6s)**; RED with app code reverted to pre-paging `1b5bac3` (spec+fixtures kept at head) = **8 fail / 3 pass**, incl. AC-2 real CDP swipe → `scrollLeft = 0` (`Expected: > 0 / Received: 0`) — the predicted delta-0 signature. The 3 passing on the pre-paging build are the landscape-only controls, proving the RED is scoped to the paging change. Genuine real-interaction test (CDP `Input.dispatchTouchEvent`, asserts scrollLeft deltas + snap rest positions), NOT computed-style in disguise.
+- **All 9 AC re-verified at head:** AC-1..AC-7 PASS (paging spec + landscape spec + full suite); AC-8 ui-evolve `verdict: ACCEPT`, `overall: 7.5/10` (≥7.4) with page A & B at 750×1000 and 672×850, operator gate DONE per orchestrator; AC-9 `tsc` exit 0, `jest` 445/445, full Playwright **90/90 (5.8m)**.
+- **Named-risk notes dispositioned** (bound to id in the verdict artifact): `fold8portrait-dirty-worktree-landscape-revert` → not-applicable (worktree clean, landscape byte-identical in HEAD — falsification met); `fold8portrait-fullheight-empty-band-uievolve` → addressed (fresh ui-evolve 7.5 ≥ 7.4 with page-B captures; empty band honestly named + quantified on a sparse control, recorded as top follow-up, not waved off; operator-accepted ship-as-is).
+- **Privacy scan (contract-compliant):** `bash scripts/privacy-scan.sh --working .ai-workspace/reviews/fold8-portrait-2col-paging-execution-review.md` → `privacy-scan: CLEAN mode=working size=12258` (exit 0); positive control (same invocation on a scratch copy carrying a seeded AWS-secret needle) → `privacy-scan: DIRTY (… credential-secret matches=1)` (exit 1) — instrument had power.
+
+<!-- execution-review verdict: PASS — 2026-08-26 — head 1b6e8c1 + this verdict commit -->
+execution-review: PASS

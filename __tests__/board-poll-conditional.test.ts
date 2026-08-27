@@ -301,7 +301,7 @@ describe("fold8-poll-metered-payload-diet AC 6 — 304 is a no-op; change lands 
     ).toBe("0");
   });
 
-  it("NRN-1: the `now` clock keeps advancing on a 304 (idle heartbeat / relative-time doesn't freeze)", async () => {
+  it("NRN-1: the `now` clock keeps advancing across repeated 304 ticks (idle heartbeat / relative-time doesn't freeze)", async () => {
     const FIXED_START = 1_800_000_000_000;
     jest.setSystemTime(FIXED_START);
 
@@ -322,9 +322,7 @@ describe("fold8-poll-metered-payload-diet AC 6 — 304 is a no-op; change lands 
       // tick 1 (+5s, total 58s) — 200(v1): same column, so no AnimatePresence
       // exit/enter duplicate — still "just now" (<60s).
       { etag: '"etag-v1"', body: board([ticket("t1", "todo", updatedAt)], FIXED_START) },
-      // tick 2 (+5s, total 63s) — 304: crosses the 60s boundary IF `now` still
-      // ticks. A frozen `now` (NRN-1 violated) would stay stuck at 58s ("just
-      // now"); a correctly-implemented 304 shows "1m ago".
+      // every tick after: 304 — the branch under test.
       { status: 304, etag: '"etag-v1"' },
     ]);
 
@@ -334,7 +332,17 @@ describe("fold8-poll-metered-payload-diet AC 6 — 304 is a no-op; change lands 
         ?.textContent
     ).toBe("just now");
 
-    await tick(); // the 304 tick.
+    // board-render-perf-inp: `now` is quantized to a 60s grid (lib/clock.ts)
+    // so an individual relative-time crossing can lag the TRUE wall-clock
+    // moment by up to one full granularity step (documented, intentional —
+    // "no rendered string may lag HEAD behavior by more than 60s", AC-4).
+    // Advance across enough 304 ticks (15 * 5s = 75s of real elapsed time,
+    // comfortably past any 60s-grid boundary from here) to observe the
+    // crossing — proving the 304 branch is what's still advancing the clock,
+    // not that it happens on the very next tick.
+    for (let i = 0; i < 15; i++) {
+      await tick();
+    }
     expect(
       container.querySelector('[aria-label^="Open ticket #t1:"] .ak-card__time')
         ?.textContent

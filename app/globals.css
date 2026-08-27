@@ -528,6 +528,36 @@ button {
   border-radius: var(--radius);
 }
 
+/* board-render-perf-inp CORE lever 2 — the off-screen windowing placeholder
+   (BoardCard.tsx). Never visible to a user (it only exists outside the
+   viewport + generous overscan margin) — its ONLY job is to hold the same
+   vertical space its real card would, so the column's scrollHeight / scroll
+   position stays proportionate as cards enter/leave the window. */
+.ak-card-spacer {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  pointer-events: none;
+  /* BUGFIX (board-render-perf-inp, Rule 18 — found live via a real scroll
+     e2e that never reached its target): `.ak-col__body` is a flex column,
+     and the inline `style={{height: estimatedHeight}}` React sets on this
+     element only supplies the flex item's BASIS — the browser's flex
+     algorithm still applies the DEFAULT flex-shrink:1 on top of that basis
+     whenever the column's ~300+ cards' combined height exceeds the
+     available cross-axis space (always true for a windowed board). A real
+     `.ak-cardbtn` has actual text content giving it a nonzero min-content
+     floor, so the shrink is imperceptible there — but this spacer has ZERO
+     content, so its floor is 0, and it got silently compressed to 0px
+     regardless of its explicit height. That collapsed the column's
+     scrollHeight down to roughly just the handful of currently-real cards,
+     defeating windowing's whole scrollbar/scroll-position parity goal
+     (hazard iv). flex-shrink:0 pins this element to its explicit height
+     unconditionally, like a real card's content effectively does. */
+  flex-shrink: 0;
+}
+
 .ak-card {
   position: relative;
   display: block;

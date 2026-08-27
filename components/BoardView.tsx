@@ -8,6 +8,8 @@ import { COLUMNS, COLUMN_LABELS } from "@/lib/board-schema";
 import { computeActiveIds } from "@/lib/active";
 import { deriveLanes } from "@/lib/lanes";
 import { decideLaneReveal } from "@/lib/lane-reveal";
+import { quantizeNow } from "@/lib/clock";
+import { mergeTickets } from "@/lib/ticket-equal";
 import { BoardColumn } from "./BoardColumn";
 import { LiveSwimlanes } from "./LiveSwimlanes";
 import { PipelineMeter } from "./PipelineMeter";
@@ -137,7 +139,7 @@ export function BoardView({ initial }: { initial: Board }) {
         // real VISUAL idle-state change, quietly falsifying the
         // `ui_gate_skip` "no visual change" reason this task ships under.
         if (res.status === 304) {
-          setNow(Date.now());
+          setNow(quantizeNow(Date.now()));
           return;
         }
         if (!res.ok) return;
@@ -151,7 +153,7 @@ export function BoardView({ initial }: { initial: Board }) {
         // an identical body without a matching 304 — still a true no-op, and
         // still must NOT freeze `now` for the same NRN-1 reason above.
         if (rawText === lastRawBoardRef.current) {
-          setNow(Date.now());
+          setNow(quantizeNow(Date.now()));
           return;
         }
         lastRawBoardRef.current = rawText;
@@ -172,8 +174,17 @@ export function BoardView({ initial }: { initial: Board }) {
         }
         prevCols.current = new Map(nextVisible.map((t) => [t.id, t.column]));
 
-        setBoard(next);
-        setNow(Date.now());
+        // board-render-perf-inp CORE lever 1: reuse the OLD ticket object for
+        // any ticket whose fields are unchanged (functional updater — always
+        // reads the LATEST board state, never a stale closure). JSON.parse
+        // above gave every ticket a fresh reference regardless of whether its
+        // content changed; this restores stable identity for the ones that
+        // didn't, so BoardCard's React.memo can bail on them downstream.
+        setBoard((prevBoard) => ({
+          ...next,
+          tickets: mergeTickets(prevBoard.tickets, next.tickets),
+        }));
+        setNow(quantizeNow(Date.now()));
 
         if (movedNow.size || freshNow.size) {
           setMoved(movedNow);
@@ -200,7 +211,7 @@ export function BoardView({ initial }: { initial: Board }) {
       document.addEventListener("visibilitychange", onVisible);
     }
 
-    setNow(Date.now());
+    setNow(quantizeNow(Date.now()));
     const id = setInterval(poll, POLL_MS);
     return () => {
       alive = false;
@@ -252,6 +263,17 @@ export function BoardView({ initial }: { initial: Board }) {
   }, [currentSession?.id]);
 
   // ---- Tickets grouped by column, newest-updated first ----
+  // board-render-perf-inp: `visible` is a NEW array reference on every board
+  // update (even a one-ticket change), so a naive useMemo here would hand
+  // BoardColumn a brand-new `tickets` array EVERY changed tick — even for a
+  // column with zero actual changes — defeating BoardColumn's own
+  // React.memo (its shallow prop comparison sees a "changed" array and
+  // re-renders regardless of contents). prevGroupedRef reuses the PREVIOUS
+  // column array whenever its contents are reference-equal element-by-element
+  // (true whenever every ticket in that column is unchanged, per
+  // lib/ticket-equal's merge upstream — an untouched column's array is then
+  // untouched too, letting BoardColumn's memo bail on that column entirely.
+  const prevGroupedRef = useRef<Record<Column, Ticket[]> | null>(null);
   const grouped = useMemo(() => {
     const g: Record<Column, Ticket[]> = {
       todo: [],
@@ -261,6 +283,21 @@ export function BoardView({ initial }: { initial: Board }) {
     };
     for (const t of visible) g[t.column].push(t);
     for (const c of COLUMNS) g[c].sort((a, b) => b.updatedAt - a.updatedAt);
+
+    const prevGrouped = prevGroupedRef.current;
+    if (prevGrouped) {
+      for (const c of COLUMNS) {
+        const prevArr = prevGrouped[c];
+        const nextArr = g[c];
+        if (
+          prevArr.length === nextArr.length &&
+          prevArr.every((t, i) => t === nextArr[i])
+        ) {
+          g[c] = prevArr;
+        }
+      }
+    }
+    prevGroupedRef.current = g;
     return g;
   }, [visible]);
 
@@ -270,10 +307,31 @@ export function BoardView({ initial }: { initial: Board }) {
   // (parallel work). `now` advances each poll, so when the session goes idle the
   // heartbeat stops. See lib/active.ts for WHY a pure "updated within N min" rule
   // is wrong here (the file-mtime touch cadence is coarse → it goes dark mid-work).
-  const activeIds = useMemo(
-    () => computeActiveIds(visible, isLive, now),
-    [visible, isLive, now],
-  );
+  //
+  // board-render-perf-inp: computeActiveIds ALWAYS returns a fresh Set, even
+  // when its MEMBERSHIP is unchanged (the common case — `visible` is a new
+  // array reference on every board update per the `grouped` comment above,
+  // so this useMemo always re-executes). Reuse the previous Set by VALUE so
+  // BoardColumn's memo (which receives `activeIds` as a prop) doesn't see a
+  // spurious "changed" reference on every board update — without this, EVERY
+  // column re-renders on ANY changed tick regardless of the grouped[] fix.
+  const prevActiveIdsRef = useRef<Set<string> | null>(null);
+  const activeIds = useMemo(() => {
+    const next = computeActiveIds(visible, isLive, now);
+    const prev = prevActiveIdsRef.current;
+    if (prev && prev.size === next.size) {
+      let sameMembers = true;
+      for (const id of next) {
+        if (!prev.has(id)) {
+          sameMembers = false;
+          break;
+        }
+      }
+      if (sameMembers) return prev;
+    }
+    prevActiveIdsRef.current = next;
+    return next;
+  }, [visible, isLive, now]);
 
   // ---- Live swimlanes — one lane per genuinely-live in-progress chain ----
   // Pure client derivation over the activeIds set already in hand (NO new fetch).

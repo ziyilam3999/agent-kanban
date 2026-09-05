@@ -50,6 +50,32 @@ jobs:
           fi
           echo "commit message OK: $COMMIT_MSG"
 
+  # agent-kanban-portrait-overflow-fold-front-screen-misclassified-as-phone (AC-10): the
+  # Rule-17 both-ends overflow guard actually RUNS on every PR, not only on a developer's
+  # machine — a guard that ships but never runs in CI protects nothing (root-cause D: three
+  # prior overflow-guard rounds were blind partly because no Playwright job existed here at
+  # all). Cost-bounded per the plan: ONE project (chromium, already the sole project in
+  # playwright.config.ts), ONE spec file, target <=3 min.
+  fold-front-screen-overflow-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install Playwright chromium only (matches playwright.config.ts's sole project)
+        run: npx playwright install --with-deps chromium
+
+      - name: Fold front-screen overflow guard (headless chromium, production-shaped board)
+        run: PW_WEB_SERVER=1 npx playwright test e2e/fold-front-screen-overflow.e2e.spec.ts --project=chromium --reporter=list
+
   privacy:
     runs-on: ubuntu-latest
     steps:

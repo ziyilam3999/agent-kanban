@@ -168,6 +168,26 @@ export function anyOffsetIncreased(before: number[], after: number[]): boolean {
   return after.some((v, i) => v > (before[i] ?? 0));
 }
 
+/**
+ * agent-kanban-portrait-overflow-fold-front-screen-misclassified-as-phone
+ * (AC-2/AC-3) — snapshot of `window.visualViewport`'s pan offsets. On a
+ * mobile browser a real touch drag over horizontally-overflowing content can
+ * pan the VISUAL viewport (the header/meter slide off-screen) even while
+ * `window.scrollX` and every `scrollLeft` stay 0 — the LAYOUT viewport is
+ * clamped, but that is a different box. `offsetLeft`/`pageLeft` are the only
+ * two ways to observe that pan; both must read 0 for the page to be
+ * genuinely un-pannable. Falls back to `{0,0}` when `visualViewport` is
+ * unsupported (never happens in Chromium, the only project this repo runs).
+ */
+export async function visualViewportOffsets(
+  page: Page,
+): Promise<{ offsetLeft: number; pageLeft: number }> {
+  return page.evaluate(() => {
+    const vv = window.visualViewport;
+    return { offsetLeft: vv ? vv.offsetLeft : 0, pageLeft: vv ? vv.pageLeft : 0 };
+  });
+}
+
 /** getBoundingClientRect() of the element matched by `selector`, as a plain object. */
 export async function boxOf(page: Page, selector: string) {
   return page.locator(selector).evaluate((el) => {

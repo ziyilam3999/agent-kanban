@@ -87,6 +87,16 @@ html {
   background: var(--ink);
   color: var(--fg);
   -webkit-text-size-adjust: 100%;
+  /* agent-kanban-portrait-overflow-fold-front-screen-misclassified-as-phone
+     (AC-2/AC-3): the "no horizontal overflow" clamp on `body` alone does NOT
+     stop a real touch drag from panning the VISUAL viewport on a mobile
+     browser — `document.scrollingElement` (the actual root scroll box) is
+     `<html>`, not `<body>`, so a horizontal-overflow child still lets a
+     finger drag the whole page sideways even while `window.scrollX` stays 0.
+     This is the document-ROOT half of the containment invariant (Intent #2):
+     it holds regardless of WHICH descendant overflows, so a future overflow
+     source is contained too (AC-3), not just today's lane-id fix. */
+  overflow-x: hidden;
 }
 
 body {
@@ -818,7 +828,22 @@ button {
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--fg-dim);
+  /* agent-kanban-portrait-overflow-fold-front-screen-misclassified-as-phone
+     (AC-1/AC-4): an id is now a real slug, not a short number — up to 80
+     chars on the production board — and `.ak-lane-head` is a flex row
+     (`min-width:0` on the head lets it shrink, but each CHILD still refuses
+     to shrink below its own content size unless it opts in too). Without
+     `min-width:0` here, a long id stayed at its full nowrap width, forced
+     `.ak-lane-head` past its 38% row share, and escaped the row — at <560px
+     that pushed the whole `.ak-lanes` panel (and the page) wider than the
+     viewport (AC-1); at every width it could paint underneath
+     `.ak-lane-track` (AC-4). Truncates exactly like the sibling
+     `.ak-lane-subject` below — an address, not a sentence; the full id is
+     still available on the card and in the drawer. */
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .ak-lane-subject {
@@ -1652,10 +1677,20 @@ button {
    queries, keyed on the BOARD's own inline size — robust in split-screen,
    where viewport width lies about the app's actual space. Rules that target
    elements OUTSIDE `.ak-main` (the shell `.ak-app`, `.ak-header`, the meter,
-   `.ak-drawer`, `.ak-lanes`) structurally CANNOT be `@container`-scoped to
-   `.ak-main` (a container only queries its descendants) — those use `@media`
-   viewport-width, sharing the identical 640 / 900 / 1023.98 numeric
-   boundaries so they switch in lockstep with the container tiers. This is
+   `.ak-drawer`) structurally CANNOT be `@container`-scoped to `.ak-main` (a
+   container only queries its descendants) — those use `@media` viewport-
+   width, sharing the identical 640 / 900 / 1023.98 numeric boundaries so
+   they switch in lockstep with the container tiers.
+   CORRECTION (agent-kanban-portrait-overflow-fold-front-screen-misclassified
+   -as-phone): `.ak-lanes` does NOT belong in that "outside .ak-main" list —
+   BoardView.tsx renders `<LiveSwimlanes>` (`.ak-lanes`) INSIDE
+   `<main className="ak-main">`, alongside `.ak-board`, so it IS a real
+   `.ak-main` descendant and IS container-queryable. It stays on its existing
+   `@media (max-width:640px)` phone rule below (unchanged, out of this
+   change's scope — that rule already works and converting a working
+   mechanism with no failing AC behind it is unwarranted churn); the id/
+   subject overflow this task fixes turned out to need no NEW tier rule at
+   any width — see `.ak-lane-id`'s own truncation fix above. This is
    safe because the board is full-bleed (`.ak-drawer` is `position:fixed` — no
    in-flow width-stealer is introduced here), so container inline-size stays
    ~= viewport width in every shipping configuration; execution-review should

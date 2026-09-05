@@ -9,6 +9,43 @@ import type { Board, LedgerComment, Ticket } from "../../lib/board-schema";
 
 const SESSION_ID = "sess0001";
 
+/**
+ * agent-kanban-portrait-overflow-fold-front-screen-misclassified-as-phone —
+ * production-token-SHAPE constants for the fold-front-screen overflow guard.
+ * The prior fixture's `id: \`90${i}\`` numeric ids (still the default above)
+ * are why three earlier overflow-guard rounds never caught the real defect:
+ * a real board's in_progress ids are kebab-case task slugs up to 80 chars
+ * (2026-08-28 snapshot: 1361 tickets, longest id 80, 120 ids over 40 chars,
+ * 225 non-numeric, longest spaceless subject token 105) — a 3-char "900"
+ * never overflows anything. These are generated to an EXACT length (never
+ * hand-counted) and are pure `[a-z0-9-]` (no spaces — required for the
+ * subject-token shape too), exported so the spec can self-assert the exact
+ * lengths on its own payload (Rule-17: "the oracle must be able to vary").
+ */
+function slugOfLength(length: number, seed: string): string {
+  const filler = "abcdefghijklmnopqrstuvwxyz0123456789-".repeat(6);
+  let id = `${seed}-`;
+  let i = 0;
+  while (id.length < length) {
+    id += filler[i % filler.length];
+    i++;
+  }
+  return id.slice(0, length).replace(/-+$/, (m) => "x".repeat(m.length));
+}
+
+/** A 71-char in_progress ticket id, kebab-case, no spaces. */
+export const PRODUCTION_ID_71 = slugOfLength(
+  71,
+  "agent-kanban-portrait-overflow-fold-front-screen-lane",
+);
+/** An 80-char in_progress ticket id, kebab-case, no spaces. */
+export const PRODUCTION_ID_80 = slugOfLength(
+  80,
+  "agent-kanban-portrait-overflow-fold-front-screen-misclassified-as-phone-lane",
+);
+/** A 105-char spaceless token, embedded inside a card subject (no spaces anywhere in it). */
+export const PRODUCTION_TOKEN_105 = slugOfLength(105, "spaceless-token");
+
 // The 4-role pipeline in execution order — a lane's current stage = highest index present.
 type Role = "planner" | "plan-review" | "executor" | "execution-review";
 const ROLE_ORDER: Role[] = ["planner", "plan-review", "executor", "execution-review"];
@@ -97,6 +134,17 @@ interface BuildOpts {
    * every existing caller sees `.ak-model` count 0, exactly as before).
    */
   modelPill?: { version: string; effort?: string };
+  /**
+   * agent-kanban-portrait-overflow-fold-front-screen-misclassified-as-phone —
+   * opt-in production-token-SHAPE swap (AC-1..AC-5's "production-shaped
+   * board"). When true AND `liveLanes >= 2`, lane 0's id becomes
+   * `PRODUCTION_ID_71` and lane 1's id becomes `PRODUCTION_ID_80` (both
+   * exported above so the spec can self-assert their exact lengths), and
+   * lane 0's subject gains a trailing `PRODUCTION_TOKEN_105` spaceless
+   * token. Every existing caller omits this => byte-for-byte unaffected
+   * (back-compat) — ids stay the short numeric `90${i}` shape.
+   */
+  productionShaped?: boolean;
 }
 
 /**
@@ -112,6 +160,7 @@ export function buildBoard({
   extraTodoCount,
   bigPayload,
   modelPill,
+  productionShaped,
 }: BuildOpts): Board {
   const now = Date.now();
   const tickets: Ticket[] = [];
@@ -119,9 +168,14 @@ export function buildBoard({
   // Live in_progress lanes — each fresh (within the 8-min window), distinct stage.
   for (let i = 0; i < liveLanes; i++) {
     const stage = i % ROLE_ORDER.length; // cycle stages so each lane lights a different node
+    const useProdId = productionShaped && i < 2;
+    const id = useProdId ? (i === 0 ? PRODUCTION_ID_71 : PRODUCTION_ID_80) : `90${i}`;
+    const baseSubject = `Live chain ${i + 1} — concurrent four-role pipeline under telemetry`;
+    const subject =
+      productionShaped && i === 0 ? `${baseSubject} ${PRODUCTION_TOKEN_105}` : baseSubject;
     tickets.push({
-      id: `90${i}`,
-      subject: `Live chain ${i + 1} — concurrent four-role pipeline under telemetry`,
+      id,
+      subject,
       description: "",
       column: "in_progress",
       status: "in_progress",

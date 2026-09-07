@@ -14,6 +14,14 @@ import {
 } from "@/lib/ui-meta";
 import { relativeTime } from "@/lib/relative-time";
 import { parseSubjectTag, subjectTagLabel } from "@/lib/subject-tag";
+import type { TicketKind } from "@/lib/ticket-kind";
+
+/** board-noise triage (D5) — kind chip label, only for non-work kinds. */
+const KIND_LABEL: Partial<Record<TicketKind, string>> = {
+  bookkeeping: "CHORE",
+  parked: "PARKED",
+  deferred: "DEFERRED",
+};
 
 interface CardProps {
   ticket: Ticket;
@@ -65,6 +73,10 @@ export function Card({ ticket, nowMs, glow, active, sessionLastActive, reduce }:
   // static ochre one.
   const held = isHeld(ticket);
   const heldFooter = heldFor(ticket, nowMs);
+  // board-noise triage (D5) — the kind chip (bookkeeping/parked/deferred only;
+  // "work" and an absent kind render nothing, matching the view default).
+  const kindLabel = ticket.kind ? KIND_LABEL[ticket.kind] : undefined;
+  const bookkeepingState = ticket.bookkeeping?.state;
 
   const cls = [
     "ak-card",
@@ -82,6 +94,14 @@ export function Card({ ticket, nowMs, glow, active, sessionLastActive, reduce }:
       <div className="ak-card__top">
         <span className="ak-card__id">#{ticket.id}</span>
         <span className="ak-card__top-right">
+          {kindLabel && (
+            <span
+              className={`ak-tag ak-tag--kind-${ticket.kind}`}
+              title={`kind: ${ticket.kind}`}
+            >
+              {kindLabel}
+            </span>
+          )}
           {hasResearch && (
             <span
               className={`ak-tag ak-tag--research${researchOpen ? " ak-tag--research-open" : ""}`}
@@ -147,6 +167,11 @@ export function Card({ ticket, nowMs, glow, active, sessionLastActive, reduce }:
           </span>
         )}
         {heldFooter && <span className="ak-hold-footer">{heldFooter}</span>}
+        {bookkeepingState && (
+          <span className={`ak-tag ak-tag--bkstate-${bookkeepingState}`}>
+            {bookkeepingState.toUpperCase()}
+          </span>
+        )}
         {model && (
           <span className="ak-model">
             {abbreviateModel(model.version)}

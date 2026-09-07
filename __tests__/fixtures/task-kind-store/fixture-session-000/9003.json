@@ -1,0 +1,9 @@
+{
+  "id": "9003",
+  "subject": "RESTORE: tidy up after the migration once things settle down",
+  "description": "Fixture-only legacy/unmigrated worktree reminder — no metadata.kind stamped, no dir name parseable from the subject. Exercises resolver step 2's ^RESTORE: fallback.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": [],
+  "metadata": {}
+}

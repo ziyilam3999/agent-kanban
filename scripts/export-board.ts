@@ -50,7 +50,14 @@ function jsonTaskFiles(dir: string): string[] {
     return [];
   }
   return entries
-    .filter((f) => f.endsWith(".json"))
+    // board-noise triage: EXPECTED.json is the shared S0 fixture store's
+    // ground-truth companion file (tests/fixtures/task-kind-store/<sess>/),
+    // living alongside the numbered ticket fixtures — never a real task file
+    // under ~/.claude/tasks/<session>/, but present when TASKS_DIR is pointed
+    // at the fixture store for a hermetic AC-1.2 run. Excluding it by exact
+    // name is a no-op against every real session dir (no real task is ever
+    // named literally "EXPECTED.json").
+    .filter((f) => f.endsWith(".json") && f !== "EXPECTED.json")
     .map((f) => path.join(dir, f))
     .filter((p) => {
       try {

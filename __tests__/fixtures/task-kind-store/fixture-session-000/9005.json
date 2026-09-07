@@ -1,0 +1,9 @@
+{
+  "id": "9005",
+  "subject": "[hygiene] sweep/clean up the quarantine folder after retention, check back later",
+  "description": "Fixture-only legacy/unmigrated quarantine-sweep reminder — no metadata.kind stamped, no specific dir named (unparseable). Exercises resolver step 2's ^\\[hygiene\\] fallback.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": [],
+  "metadata": {}
+}

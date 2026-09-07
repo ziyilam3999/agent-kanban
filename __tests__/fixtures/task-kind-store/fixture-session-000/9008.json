@@ -1,0 +1,15 @@
+{
+  "id": "9008",
+  "subject": "[reversible-op RESTORE] re-enable disabled fixture cron entry",
+  "description": "Fixture-only reversible-op-restore reminder with a FORBIDDEN (mutating, non-allowlisted) restore_check verb. The sweep must refuse this predicate rather than execute it.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": [],
+  "metadata": {
+    "kind": "bookkeeping",
+    "bookkeeping": {
+      "type": "reversible-op-restore",
+      "restore_check": "rm -rf /tmp/fixture-marker"
+    }
+  }
+}

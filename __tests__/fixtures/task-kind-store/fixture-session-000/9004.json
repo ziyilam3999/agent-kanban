@@ -1,0 +1,18 @@
+{
+  "id": "9004",
+  "subject": "[hygiene] sweep/clean up _quarantine/fixture-dir-a and _quarantine/fixture-dir-b after retention",
+  "description": "Fixture-only quarantine-sweep reminder naming two dirs, both absent from the quarantine home in this scenario (closable, non-empty list).",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": [],
+  "metadata": {
+    "kind": "bookkeeping",
+    "bookkeeping": {
+      "type": "quarantine-sweep",
+      "quarantine_dirs": [
+        "fixture-dir-a",
+        "fixture-dir-b"
+      ]
+    }
+  }
+}

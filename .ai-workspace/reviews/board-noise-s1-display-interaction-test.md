@@ -42,7 +42,7 @@ hidden content underneath measures 0 or 1900px).
 ## Structured fields (ui-task-gate.sh schema)
 
 ```
-interaction-test:
+interaction-test: e2e/shelf.e2e.spec.ts (AC-1.5 shelf real-interaction, viewport 390x844 touch)
 asserts=scroll-delta
 viewport=390x844 touch=true
 red-on-prefix=2de175457bf9ef5385b5aebb27f7e46a588d1852 (pre-fix origin/master HEAD — this

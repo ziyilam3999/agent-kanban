@@ -10,10 +10,12 @@ import { deriveLanes } from "@/lib/lanes";
 import { decideLaneReveal } from "@/lib/lane-reveal";
 import { quantizeNow } from "@/lib/clock";
 import { mergeTickets } from "@/lib/ticket-equal";
+import { isDisplayWork } from "@/lib/ticket-kind";
 import { BoardColumn } from "./BoardColumn";
 import { LiveSwimlanes } from "./LiveSwimlanes";
 import { PipelineMeter } from "./PipelineMeter";
 import { SessionPicker } from "./SessionPicker";
+import { Shelf } from "./Shelf";
 import { Drawer } from "./Drawer";
 
 // 5s poll: paired with the /api/board CDN cache (s-maxage=10), most polls are
@@ -273,6 +275,15 @@ export function BoardView({ initial }: { initial: Board }) {
   // (true whenever every ticket in that column is unchanged, per
   // lib/ticket-equal's merge upstream — an untouched column's array is then
   // untouched too, letting BoardColumn's memo bail on that column entirely.
+  // board-noise triage (task-kind-contract.md §4 D1) — only `kind == work`
+  // tickets fill the four columns, INCLUDING Done (else an auto-retired chore
+  // floods it). `isDisplayWork` treats an absent `kind` as "work" (the view
+  // default), so a pre-board-noise snapshot is byte-for-byte unaffected. This
+  // is the ONE work-filtered ticket array — both `grouped` (below) AND
+  // PipelineMeter (the header stat tiles) derive from it, so the tiles and
+  // the columns can never disagree about what counts as "real work".
+  const workVisible = useMemo(() => visible.filter((t) => isDisplayWork(t.kind)), [visible]);
+
   const prevGroupedRef = useRef<Record<Column, Ticket[]> | null>(null);
   const grouped = useMemo(() => {
     const g: Record<Column, Ticket[]> = {
@@ -281,7 +292,7 @@ export function BoardView({ initial }: { initial: Board }) {
       in_review: [],
       done: [],
     };
-    for (const t of visible) g[t.column].push(t);
+    for (const t of workVisible) g[t.column].push(t);
     for (const c of COLUMNS) g[c].sort((a, b) => b.updatedAt - a.updatedAt);
 
     const prevGrouped = prevGroupedRef.current;
@@ -299,7 +310,23 @@ export function BoardView({ initial }: { initial: Board }) {
     }
     prevGroupedRef.current = g;
     return g;
-  }, [visible]);
+  }, [workVisible]);
+
+  // ---- board-noise triage (D2/D3) — shelf population + header pill ----
+  // Shelf: OPEN (non-terminal) non-work tickets for the selected session,
+  // grouped by kind inside the Shelf component. Header pill: the ACTIVE
+  // predicate every counter shares (task-kind-contract.md §3.2) — status in
+  // {pending, in_progress} AND resolvedKind == "work" — vs the open-shelf
+  // count (same "open" gate, non-work).
+  const shelfTickets = useMemo(
+    () => visible.filter((t) => t.status !== "completed" && !isDisplayWork(t.kind)),
+    [visible]
+  );
+  const activeWorkCount = useMemo(
+    () => visible.filter((t) => t.status !== "completed" && isDisplayWork(t.kind)).length,
+    [visible]
+  );
+  const onShelfCount = shelfTickets.length;
 
   // ---- Tickets the agent is ACTIVELY working right now (breathing heartbeat) ----
   // In a live session, the most-recently-updated in-progress ticket (the current
@@ -448,6 +475,13 @@ export function BoardView({ initial }: { initial: Board }) {
                 {laneCount} {laneCount === 1 ? "LANE" : "LANES"} LIVE
               </span>
             )}
+            {/* board-noise triage (D3) — the ACTIVE/SHELF pill, unconditional
+                (not gated on isLive like the lanes pill above): it describes
+                the column population, which is meaningful for an idle
+                session too. */}
+            <span className="ak-shelfcount" aria-live="polite">
+              {activeWorkCount} ACTIVE · {onShelfCount} ON SHELF
+            </span>
             <span
               className={`ak-live${isLive ? "" : " ak-live--off"}`}
               aria-live="polite"
@@ -457,7 +491,9 @@ export function BoardView({ initial }: { initial: Board }) {
             </span>
           </div>
         </div>
-        <PipelineMeter tickets={visible} />
+        {/* board-noise triage (D1) — fed workVisible (not visible) so the header
+            stat tiles agree with the columns below on what counts as work. */}
+        <PipelineMeter tickets={workVisible} />
       </header>
 
       <main className="ak-main">
@@ -517,6 +553,12 @@ export function BoardView({ initial }: { initial: Board }) {
             );
           })}
         </div>
+
+        {/* board-noise triage (D2) — the collapsed shelf strip below the column
+            board, closed by default. Mounted unconditionally (an empty shelf
+            still shows "Bookkeeping 0 · Parked 0 · Deferred 0"), matching the
+            design's "the columns and counter show only real work" framing. */}
+        <Shelf tickets={shelfTickets} now={now} onSelect={setSelectedId} />
       </main>
 
       <Drawer

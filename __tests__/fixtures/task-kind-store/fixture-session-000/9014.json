@@ -1,0 +1,11 @@
+{
+  "id": "9014",
+  "subject": "Fixture umbrella: sunset the legacy widgets initiative",
+  "description": "Fixture-only umbrella ticket, already completed with a DROPPED disposition. Referenced by 9015's [PARKED #9014] prefix as the cascade-close trigger.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": [],
+  "metadata": {
+    "disposition": "DROPPED-2026-08-25: initiative sunset, no further children needed"
+  }
+}

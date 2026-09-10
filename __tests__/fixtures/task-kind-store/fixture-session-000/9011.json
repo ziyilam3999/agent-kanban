@@ -1,0 +1,17 @@
+{
+  "id": "9011",
+  "subject": "[hygiene] sweep/clean up _quarantine/fixture-dir-in-progress after retention",
+  "description": "Fixture-only quarantine-sweep ticket whose status is in_progress. The named dir is absent (would otherwise be closable) but the in_progress invariant must block ANY write.",
+  "status": "in_progress",
+  "blocks": [],
+  "blockedBy": [],
+  "metadata": {
+    "kind": "bookkeeping",
+    "bookkeeping": {
+      "type": "quarantine-sweep",
+      "quarantine_dirs": [
+        "fixture-dir-in-progress"
+      ]
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "id": "9020",
+  "subject": "[EPIC] fixture-only: launch the v2 reporting dashboard",
+  "description": "Fixture-only deferred epic, explicitly stamped kind:deferred, blocked by 9018 which is COMPLETED in this fixture set. The raw resolver still reports deferred (step 4's auto-unshelve is board-only, not part of this contract's resolver).",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": [
+    "9018"
+  ],
+  "metadata": {
+    "kind": "deferred",
+    "blocked_reason": "Sequenced behind the fixture worktree retirement completing first, per the fixture epic ordering"
+  }
+}

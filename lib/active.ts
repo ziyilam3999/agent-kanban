@@ -19,6 +19,7 @@ import {
   isFailClassVerdict,
   shippingAfterPass,
 } from "./ui-meta";
+import { isDisplayWork } from "./ticket-kind";
 
 /** A ticket is "active" when its session is live and updated within this window
  *  — widened from 3 min because the file-mtime touch cadence is coarse. The
@@ -491,12 +492,19 @@ export function computeActiveIds(
   // same 6h cap; it may also become the focus when it is the newest-updated
   // member — correct, since a running review IS the session's current work.
   // deriveLanes' population filter MUST stay matched with this one.
+  // board-noise triage (task-kind-contract.md §4 D4) — a non-work ticket
+  // (bookkeeping / parked / deferred) never lights a lane or counts toward the
+  // ceiling, even if it is flipped to in_progress (a chore is not a lane, per
+  // the design's §2 mechanism table). `t.kind` is OPTIONAL for back-compat
+  // with pre-board-noise snapshots — absent ⇒ "work" (the view default), so an
+  // old snapshot is byte-for-byte unaffected by this filter.
   const inProgress = tickets.filter(
     (t) =>
       (t.column === "in_progress" ||
         shippingAfterPass(t) ||
         pendingReviewInFlight(t)) &&
-      !isHeld(t)
+      !isHeld(t) &&
+      isDisplayWork(t.kind)
   );
   if (inProgress.length === 0) return active;
 

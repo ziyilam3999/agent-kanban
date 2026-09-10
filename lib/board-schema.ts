@@ -1,6 +1,9 @@
 // board-schema.ts — the contract between the exporter (scripts/export-board.mjs) and the web view.
 // The exporter produces a Board snapshot; the UI renders it. Keep this the single source of the shape.
 
+import type { TicketKind } from "./ticket-kind";
+export type { TicketKind } from "./ticket-kind";
+
 /** The four derived columns, in display order. */
 export const COLUMNS = ["todo", "in_progress", "in_review", "done"] as const;
 export type Column = (typeof COLUMNS)[number];
@@ -100,6 +103,32 @@ export interface Ticket {
    * `completed` ticket's `onHold` is ignored by every consumer.
    */
   onHold?: string;
+  /**
+   * board-noise triage (S1 DISPLAY, task-kind-contract.md §2-3) — the ticket's
+   * RESOLVED `metadata.kind`, already through the board-only step-4 post-rule
+   * (a `deferred` ticket whose `blockedBy` is empty AFTER blocker-resolution
+   * renders as `work` — see `buildBoard`). OPTIONAL for back-compat with old
+   * blob snapshots exported before this field existed; every consumer treats
+   * an absent `kind` as `"work"` (the design's §4 view default) so an old
+   * snapshot renders byte-identically to today (every ticket stays in its
+   * column, no shelf, no exclusion from the lane population).
+   */
+  kind?: TicketKind;
+  /**
+   * Only present when `kind === "bookkeeping"` (redacted; task-kind-contract.md
+   * §3.1). `state` is written ONLY by the ai-brain sweep, never authored by
+   * hand — a card renders it in the footer when present (D5).
+   */
+  bookkeeping?: {
+    type?: string;
+    state?: "due" | "unchecked" | "held";
+  };
+  /** Only present when `kind === "parked"` (redacted). The umbrella ticket id. */
+  parkedUnder?: string;
+  /** Only present when `kind === "deferred"` (redacted, ≥20 chars per the contract). */
+  blockedReason?: string;
+  /** Present on any closed/re-kinded ticket carrying a disposition (redacted). */
+  disposition?: string;
 }
 
 /** A selectable session (one board). */

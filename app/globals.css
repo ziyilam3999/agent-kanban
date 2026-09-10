@@ -51,6 +51,12 @@
      (4.5:1) with headroom. */
   --hold: #c99a4c;
 
+  /* board-noise triage (task-kind-contract.md §4) — the shelf's own neutral
+     steel-grey, distinct from every column hue (--todo/--prog/--review/--done)
+     and every role hue above, signalling "not a pipeline stage, not a live
+     lane" at a glance. WCAG-computed ~5.9:1 on --panel — clears AA (4.5:1). */
+  --shelf: #8d99a6;
+
   /* Atmosphere */
   --dot: rgba(124, 138, 150, 0.10);
   --radius: 10px;
@@ -527,6 +533,88 @@ button {
   border-radius: 3px;
 }
 
+/* ------------------------------------------------------------- Noise shelf */
+/* board-noise triage (task-kind-contract.md §4 D2) — the collapsed strip of
+   non-work tickets (bookkeeping/parked/deferred), BELOW the column strip,
+   full-width, closed by default. Mobile-first: it never widens the strip
+   above it — a plain full-width block regardless of viewport. */
+.ak-shelf {
+  margin: 4px 14px 20px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.ak-shelf__summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 11px 14px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--shelf);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ak-shelf__summary::-webkit-details-marker {
+  display: none;
+}
+
+/* A small caret that flips with the details' open state — pure CSS, no JS. */
+.ak-shelf__summary::before {
+  content: "▸";
+  display: inline-block;
+  color: var(--fg-faint);
+  transition: transform 0.15s ease;
+}
+
+.ak-shelf[open] > .ak-shelf__summary::before {
+  transform: rotate(90deg);
+}
+
+/* EXPLICIT display:none while closed (measured: this Chromium build does NOT
+   suppress a closed <details>'s non-summary children via any UA rule an
+   author selector can rely on — `getComputedStyle` reports `display:block`
+   and a real scrollHeight on an untouched closed shelf without this rule).
+   Keying visibility off `.ak-shelf[open]` ourselves is the deterministic fix
+   — AC-1.5 needs scrollHeight to read genuinely 0 while closed. */
+.ak-shelf__body {
+  display: none;
+}
+
+.ak-shelf[open] > .ak-shelf__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--line);
+}
+
+.ak-shelf__group-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-meta);
+  margin: 0 0 8px;
+}
+
+.ak-shelf__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.ak-shelf-card {
+  opacity: 0.88;
+}
+
 /* ------------------------------------------------------------- Card tile */
 .ak-cardbtn {
   display: block;
@@ -755,6 +843,23 @@ button {
   border-radius: 999px;
   background: color-mix(in srgb, var(--live) 7%, transparent);
   white-space: nowrap;
+}
+
+/* board-noise triage (D3) — "N ACTIVE · M ON SHELF". Same pill shape as
+   .ak-lanecount, own neutral --shelf hue (never mint — this is not a "live
+   right now" signal, it's a population count). */
+.ak-shelfcount {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--shelf);
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--shelf) 30%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--shelf) 8%, transparent);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ----------------------------------------------------- Live Swimlanes */
@@ -1158,6 +1263,30 @@ button {
   }
 }
 
+/* board-noise triage (D5) — kind chip (card top-right) + bookkeeping-state
+   footer badge. Same .ak-tag shape as the role chips above, own --shelf hue
+   so a chore/parked/deferred card never reads as a pipeline-role marker. */
+.ak-tag--kind-bookkeeping,
+.ak-tag--kind-parked,
+.ak-tag--kind-deferred {
+  color: color-mix(in srgb, var(--shelf) 85%, #eee);
+  border-color: color-mix(in srgb, var(--shelf) 40%, transparent);
+  background: color-mix(in srgb, var(--shelf) 10%, transparent);
+}
+
+.ak-tag--bkstate-due,
+.ak-tag--bkstate-unchecked,
+.ak-tag--bkstate-held {
+  font-size: 9px;
+  color: var(--fg-meta);
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--line) 45%, transparent);
+}
+.ak-tag--bkstate-due {
+  color: color-mix(in srgb, var(--review) 85%, #eee);
+  border-color: color-mix(in srgb, var(--review) 35%, transparent);
+}
+
 .ak-card__foot {
   display: flex;
   align-items: center;
@@ -1385,6 +1514,44 @@ button {
   line-height: 1.5;
   color: var(--fg);
   margin: 0;
+}
+
+/* board-noise triage (D5) — the kind-metadata 2-column table (bookkeeping.
+   parked_under/blocked_reason/disposition). Same quiet-panel shape as the
+   on-hold block above, own --shelf hue. */
+.ak-drawer__kindmeta {
+  border: 1px solid color-mix(in srgb, var(--shelf) 30%, transparent);
+  background: color-mix(in srgb, var(--shelf) 6%, transparent);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 16px;
+}
+
+.ak-drawer__kindmeta .ak-drawer__section {
+  color: var(--shelf);
+  margin: 0 0 8px;
+}
+
+.ak-kindmeta-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.ak-kindmeta-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--fg-meta);
+  padding: 3px 10px 3px 0;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.ak-kindmeta-table td {
+  color: var(--fg);
+  padding: 3px 0;
+  word-break: break-word;
 }
 
 /* Pipeline stage bar — 4 pills (planner → plan-review → executor → exec-review).

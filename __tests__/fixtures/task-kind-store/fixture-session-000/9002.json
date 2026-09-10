@@ -1,0 +1,16 @@
+{
+  "id": "9002",
+  "subject": "RESTORE: quarantine the fixture-repo old-preview-branch worktree (mv -b to _quarantine/) once epic settles",
+  "description": "Fixture-only worktree-quarantine reminder, stamped post-S4-backfill shape. The named worktree is absent from `git worktree list --porcelain` in this scenario (closable).",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": [],
+  "metadata": {
+    "kind": "bookkeeping",
+    "bookkeeping": {
+      "type": "worktree-quarantine",
+      "repo": "fixture-repo",
+      "worktree": "old-preview-branch"
+    }
+  }
+}

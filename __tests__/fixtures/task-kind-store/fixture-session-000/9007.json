@@ -1,0 +1,15 @@
+{
+  "id": "9007",
+  "subject": "[reversible-op RESTORE] re-enable the paused fixture-watchdog launchd job",
+  "description": "Fixture-only reversible-op-restore reminder with a read-only, allowlisted restore_check (pgrep). Scenario: the watchdog is already running again, so the check is expected to exit 0 (closable).",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": [],
+  "metadata": {
+    "kind": "bookkeeping",
+    "bookkeeping": {
+      "type": "reversible-op-restore",
+      "restore_check": "pgrep -f fixture-watchdog-marker"
+    }
+  }
+}

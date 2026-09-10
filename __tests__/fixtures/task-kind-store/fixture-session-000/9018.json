@@ -1,0 +1,20 @@
+{
+  "id": "9018",
+  "subject": "RESTORE: quarantine the fixture-repo old-storyboard-leg worktree (mv -b to _quarantine/) once epic settles",
+  "description": "Fixture-only worktree-quarantine ticket already auto-retired by a prior sweep run (status completed, full close-record metadata present). Also reused as the COMPLETED blocker target for 9020's blockedBy. The sweep must skip an already-completed ticket entirely.",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": [],
+  "metadata": {
+    "kind": "bookkeeping",
+    "bookkeeping": {
+      "type": "worktree-quarantine",
+      "repo": "fixture-repo",
+      "worktree": "old-storyboard-leg"
+    },
+    "disposition": "AUTO-RETIRED-2026-08-20: worktree absent from git worktree list --porcelain",
+    "outcome_eval": "achieved",
+    "outcome_evidence": "git worktree list --porcelain showed no entry named old-storyboard-leg for fixture-repo",
+    "closed_by": "board-bookkeeping-sweep"
+  }
+}

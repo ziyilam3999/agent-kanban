@@ -1,0 +1,11 @@
+{
+  "id": "9013",
+  "subject": "Investigate the fixture ingestion crash under load",
+  "description": "Fixture-only ticket carrying a legacy metadata.kind value ('bug') not in the current enum {work,bookkeeping,parked,deferred}. Resolver step 1 does not match (not in enum); no noise prefix so step 2 does not match either; falls to step 3 => work.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": [],
+  "metadata": {
+    "kind": "bug"
+  }
+}

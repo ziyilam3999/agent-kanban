@@ -1,0 +1,9 @@
+{
+  "id": "9015",
+  "subject": "[PARKED #9014] explore a themed widget skin for the legacy dashboard",
+  "description": "Fixture-only parked ticket (legacy subject-prefix shape, no metadata.kind stamped). Its umbrella (9014) is completed with a DROPPED disposition, so the parked cascade condition holds this run: expected sweep action is close (DROPPED-<date>: with umbrella #9014).",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": [],
+  "metadata": {}
+}

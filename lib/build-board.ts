@@ -20,6 +20,7 @@ import type {
 } from "./board-schema";
 import { LIVE_WINDOW_MS } from "./board-schema";
 import { PIPELINE_ROLES, isFailClassVerdict } from "./ui-meta";
+import { resolveTicketKind } from "./ticket-kind";
 // board-inprogress-recency — reuse the EXISTING "is this lane still alive"
 // threshold (lib/active.ts, #1980) for the pending→in_progress promotion's
 // recency gate, rather than minting a second identical 6h magic number. No
@@ -55,7 +56,30 @@ export interface RawTask {
    * RawTask` cast (not a field whitelist), so `metadata` already reaches
    * `buildTicket` at runtime with zero exporter changes.
    */
-  metadata?: { on_hold?: string };
+  metadata?: {
+    on_hold?: string;
+    /**
+     * board-noise triage (task-kind-contract.md §3.1). `kind` is free-form at
+     * the raw-task layer — `resolveTicketKind` (lib/ticket-kind.ts) validates
+     * it against the enum and falls back through the subject-prefix table /
+     * "work" default, so an unrecognised or legacy value (e.g. `"restore"`,
+     * `"bug"`) here is exactly as safe as an absent one.
+     */
+    kind?: string;
+    bookkeeping?: {
+      type?: string;
+      quarantine_dirs?: string[];
+      repo?: string;
+      worktree?: string;
+      restore_check?: string;
+      hold_until_task?: string;
+      state?: "due" | "unchecked" | "held";
+      review_by?: string;
+    };
+    parked_under?: string;
+    blocked_reason?: string;
+    disposition?: string;
+  };
 }
 
 /** One parsed line from a ~/.claude/3role-ledger/<session>/<id>.jsonl file. */
@@ -393,6 +417,30 @@ export function buildTicket(
   if (rawTask.metadata?.on_hold) {
     ticket.onHold = redact(rawTask.metadata.on_hold);
   }
+
+  // board-noise triage (task-kind-contract.md §3.2 steps 1-3 ONLY — the
+  // board-only step-4 deferred auto-unshelve post-rule is applied later, in
+  // buildBoard, which alone holds the cross-ticket statusById map that step
+  // needs). D5 — the per-kind sub-fields consumed by the card footer + drawer
+  // table, each redact()ed before it ever reaches a component.
+  ticket.kind = resolveTicketKind(rawTask);
+  const bk = rawTask.metadata?.bookkeeping;
+  if (ticket.kind === "bookkeeping" && bk) {
+    const bookkeeping: Ticket["bookkeeping"] = {};
+    if (bk.type) bookkeeping.type = redact(bk.type);
+    if (bk.state) bookkeeping.state = bk.state;
+    if (bookkeeping.type || bookkeeping.state) ticket.bookkeeping = bookkeeping;
+  }
+  if (ticket.kind === "parked" && rawTask.metadata?.parked_under) {
+    ticket.parkedUnder = redact(rawTask.metadata.parked_under);
+  }
+  if (ticket.kind === "deferred" && rawTask.metadata?.blocked_reason) {
+    ticket.blockedReason = redact(rawTask.metadata.blocked_reason);
+  }
+  if (rawTask.metadata?.disposition) {
+    ticket.disposition = redact(rawTask.metadata.disposition);
+  }
+
   return ticket;
 }
 
@@ -549,9 +597,19 @@ export function buildBoard(input: BuildBoardInput): Board {
     const filtered = filterResolvedBlockers(t.blockedBy, statusById);
     // filterResolvedBlockers only ever removes ids, so an equal length means
     // nothing changed → reuse the original object (no needless copy).
-    return filtered.length === t.blockedBy.length
-      ? t
-      : { ...t, blockedBy: filtered };
+    const withBlockedBy =
+      filtered.length === t.blockedBy.length ? t : { ...t, blockedBy: filtered };
+
+    // board-noise triage (task-kind-contract.md §3.2 step 4 — BOARD-ONLY,
+    // never part of the universal resolver, never applied by the ai-brain
+    // sweep or any other counter): a ticket whose resolved kind is `deferred`
+    // renders as `work` once its `blockedBy` is EMPTY after resolution
+    // (auto-unshelve) — this is the only place holding the statusById map
+    // step 4 needs, so it runs here, right after filterResolvedBlockers.
+    if (withBlockedBy.kind === "deferred" && withBlockedBy.blockedBy.length === 0) {
+      return { ...withBlockedBy, kind: "work" as const };
+    }
+    return withBlockedBy;
   });
   return {
     schema: 1,

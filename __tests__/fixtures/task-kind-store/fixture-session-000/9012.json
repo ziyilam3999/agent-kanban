@@ -1,0 +1,16 @@
+{
+  "id": "9012",
+  "subject": "[reversible-op RESTORE] re-enable fixture job once the blocking cleanup finishes",
+  "description": "Fixture-only reversible-op-restore ticket with hold_until_task pointing at 9001, which is OPEN (pending) in this fixture set. Expected sweep action: held.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": [],
+  "metadata": {
+    "kind": "bookkeeping",
+    "bookkeeping": {
+      "type": "reversible-op-restore",
+      "restore_check": "pgrep -f fixture-held-marker",
+      "hold_until_task": "9001"
+    }
+  }
+}

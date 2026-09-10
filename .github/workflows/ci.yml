@@ -34,6 +34,15 @@ jobs:
       - name: Tests (jest)
         run: npm test
 
+      # agent-kanban-ci-needs-npm-run-build-prod-minifier-net: dev-mode typecheck/jest never
+      # run the production minifier (cssnano), so a prod-only defect (PR #80: a malformed
+      # CSS comment) can pass every check above and still fail only at Vercel's deploy. This
+      # step runs the real production build on every PR/push so that class of defect reds
+      # THIS check, independent of Vercel being wired up or watched. No secret, no private
+      # data env var — the build does not fetch the board data at build time.
+      - name: Production build (next build — runs the real minifier)
+        run: npm run build
+
       # Conventional Commits gate (mirrors content-pipeline). eslint is intentionally
       # deferred until a ruleset is agreed, to avoid a day-1 style-only red board.
       - name: Validate commit message

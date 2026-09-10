@@ -1516,7 +1516,7 @@ button {
   margin: 0;
 }
 
-/* board-noise triage (D5) — the kind-metadata 2-column table (bookkeeping.*/
+/* board-noise triage (D5) — the kind-metadata 2-column table (bookkeeping.
    parked_under/blocked_reason/disposition). Same quiet-panel shape as the
    on-hold block above, own --shelf hue. */
 .ak-drawer__kindmeta {

@@ -1,0 +1,9 @@
+{
+  "id": "9009",
+  "subject": "[reversible-op RESTORE] re-enable the ollama gateway bootout once retention clears",
+  "description": "Fixture-only legacy/unmigrated reversible-op reminder — no metadata.kind stamped, no restore_check field. Exercises resolver step 2's ^\\[reversible-op RESTORE\\] fallback.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": [],
+  "metadata": {}
+}

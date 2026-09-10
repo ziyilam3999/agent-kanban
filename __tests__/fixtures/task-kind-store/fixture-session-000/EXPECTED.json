@@ -1,0 +1,82 @@
+{
+  "9001": {
+    "resolvedKind": "work",
+    "sweepAction": "n/a"
+  },
+  "9002": {
+    "resolvedKind": "bookkeeping",
+    "sweepAction": "close"
+  },
+  "9003": {
+    "resolvedKind": "bookkeeping",
+    "sweepAction": "unchecked"
+  },
+  "9004": {
+    "resolvedKind": "bookkeeping",
+    "sweepAction": "close"
+  },
+  "9005": {
+    "resolvedKind": "bookkeeping",
+    "sweepAction": "unchecked"
+  },
+  "9006": {
+    "resolvedKind": "bookkeeping",
+    "sweepAction": "untouched"
+  },
+  "9007": {
+    "resolvedKind": "bookkeeping",
+    "sweepAction": "close"
+  },
+  "9008": {
+    "resolvedKind": "bookkeeping",
+    "sweepAction": "refuse"
+  },
+  "9009": {
+    "resolvedKind": "bookkeeping",
+    "sweepAction": "unchecked"
+  },
+  "9010": {
+    "resolvedKind": "bookkeeping",
+    "sweepAction": "due"
+  },
+  "9011": {
+    "resolvedKind": "bookkeeping",
+    "sweepAction": "untouched"
+  },
+  "9012": {
+    "resolvedKind": "bookkeeping",
+    "sweepAction": "held"
+  },
+  "9013": {
+    "resolvedKind": "work",
+    "sweepAction": "n/a"
+  },
+  "9014": {
+    "resolvedKind": "work",
+    "sweepAction": "n/a"
+  },
+  "9015": {
+    "resolvedKind": "parked",
+    "sweepAction": "close"
+  },
+  "9016": {
+    "resolvedKind": "work",
+    "sweepAction": "n/a"
+  },
+  "9017": {
+    "resolvedKind": "parked",
+    "sweepAction": "never"
+  },
+  "9018": {
+    "resolvedKind": "bookkeeping",
+    "sweepAction": "n/a"
+  },
+  "9019": {
+    "resolvedKind": "deferred",
+    "sweepAction": "n/a"
+  },
+  "9020": {
+    "resolvedKind": "deferred",
+    "sweepAction": "n/a"
+  }
+}

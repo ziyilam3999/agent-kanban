@@ -1,0 +1,14 @@
+{
+  "id": "9019",
+  "subject": "[EPIC] fixture-only: build the v2 ingestion pipeline",
+  "description": "Fixture-only deferred epic, explicitly stamped kind:deferred, blocked by 9001 which is OPEN (pending) in this fixture set.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": [
+    "9001"
+  ],
+  "metadata": {
+    "kind": "deferred",
+    "blocked_reason": "Sequenced behind the fixture ingestion exporter work landing first, per the fixture epic ordering"
+  }
+}

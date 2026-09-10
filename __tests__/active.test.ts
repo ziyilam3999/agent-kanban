@@ -1,4 +1,7 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { computeActiveIds, ACTIVE_WINDOW_MS } from "@/lib/active";
+import { resolveTicketKind } from "@/lib/ticket-kind";
 import type { Ticket } from "@/lib/board-schema";
 
 const NOW = 1_000_000_000_000;
@@ -70,5 +73,49 @@ describe("computeActiveIds", () => {
 
   it("the window is widened past the old brittle 3-min value", () => {
     expect(ACTIVE_WINDOW_MS).toBeGreaterThan(3 * 60 * 1000);
+  });
+
+  // board-noise triage (task-kind-contract.md §4 D4, S1 AC-1.3) — an
+  // in_progress ticket whose resolved kind is NOT "work" (bookkeeping /
+  // parked / deferred) never lights a lane or counts toward the ceiling,
+  // even though it is the most-recent in_progress ticket (would otherwise
+  // win the "focus" disjunct unconditionally). A chore is not a lane.
+  it("board-noise D4: an in_progress bookkeeping ticket is EXCLUDED from activeIds", () => {
+    const bookkeepingTicket: Ticket = { ...ticket("chore-1", "in_progress", 0), kind: "bookkeeping" };
+    const workTicket = ticket("work-1", "in_progress", 2);
+    const active = computeActiveIds([bookkeepingTicket, workTicket], true, NOW);
+    expect(active.has("chore-1")).toBe(false);
+    expect(active.has("work-1")).toBe(true);
+  });
+
+  it("board-noise D4: an in_progress bookkeeping ticket ALONE lights nothing (not just demoted)", () => {
+    const bookkeepingTicket: Ticket = { ...ticket("chore-1", "in_progress", 0), kind: "bookkeeping" };
+    const active = computeActiveIds([bookkeepingTicket], true, NOW);
+    expect(active.size).toBe(0);
+  });
+
+  it("board-noise D4: an in_progress ticket with no kind field (pre-board-noise snapshot) still lights — the view default is work", () => {
+    const active = computeActiveIds([ticket("legacy-1", "in_progress", 0)], true, NOW);
+    expect(active.has("legacy-1")).toBe(true);
+  });
+
+  // AC-1.3 literal wording: "a fixture snapshot with an in_progress
+  // bookkeeping ticket in a live session yields an activeIds set that
+  // excludes it" — bound directly to the shared S0 fixture (9011:
+  // in_progress, kind bookkeeping/quarantine-sweep, the fixture's own
+  // dedicated in_progress-invariant case).
+  it("AC-1.3: the S0 fixture's in_progress bookkeeping ticket (9011) is excluded from a live session's activeIds", () => {
+    const raw = JSON.parse(
+      fs.readFileSync(
+        path.join(__dirname, "fixtures", "task-kind-store", "fixture-session-000", "9011.json"),
+        "utf8"
+      )
+    );
+    expect(raw.status).toBe("in_progress");
+    expect(resolveTicketKind(raw)).toBe("bookkeeping");
+
+    const fixtureTicket: Ticket = { ...ticket("9011", "in_progress", 0), kind: resolveTicketKind(raw) };
+    const active = computeActiveIds([fixtureTicket], true, NOW);
+    expect(active.has("9011")).toBe(false);
   });
 });

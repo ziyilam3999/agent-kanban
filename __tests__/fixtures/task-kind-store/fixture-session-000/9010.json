@@ -1,0 +1,15 @@
+{
+  "id": "9010",
+  "subject": "[hygiene] review the fixture-store retention policy",
+  "description": "Fixture-only cleanup-type bookkeeping ticket with a review_by date in the past relative to this fixture set's creation — surfaces as due, never auto-closed.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": [],
+  "metadata": {
+    "kind": "bookkeeping",
+    "bookkeeping": {
+      "type": "cleanup",
+      "review_by": "2026-08-01"
+    }
+  }
+}

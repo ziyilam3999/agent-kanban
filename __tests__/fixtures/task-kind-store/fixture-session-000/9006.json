@@ -1,0 +1,15 @@
+{
+  "id": "9006",
+  "subject": "[hygiene] quarantine-home retention — standing",
+  "description": "THE B1 FIXTURE. Mirrors the S5 standing ticket's exact subject + shape: explicit empty quarantine_dirs array is the standing-marker shape and must NEVER auto-close (an empty array is vacuously 'all absent' — B1). Sweep action is untouched: no close, no state write.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": [],
+  "metadata": {
+    "kind": "bookkeeping",
+    "bookkeeping": {
+      "type": "quarantine-sweep",
+      "quarantine_dirs": []
+    }
+  }
+}

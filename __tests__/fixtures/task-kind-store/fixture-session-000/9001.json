@@ -1,0 +1,9 @@
+{
+  "id": "9001",
+  "subject": "Wire the new metrics exporter into the nightly report",
+  "description": "Fixture-only work ticket: plain subject, no noise prefix, no metadata.kind. Also reused as the OPEN blocker target for 9012's hold_until_task and 9019's blockedBy.",
+  "status": "pending",
+  "blocks": [],
+  "blockedBy": [],
+  "metadata": {}
+}

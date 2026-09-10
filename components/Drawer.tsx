@@ -335,6 +335,8 @@ export function Drawer({ ticket, nowMs, onClose }: DrawerProps) {
                 </div>
               )}
 
+              <KindMeta ticket={ticket} />
+
               <PipelineProgress ticket={ticket} />
 
               <p className="ak-drawer__section">Black-box timeline</p>
@@ -407,6 +409,40 @@ export function Drawer({ ticket, nowMs, onClose }: DrawerProps) {
         </>
       )}
     </AnimatePresence>
+  );
+}
+
+/**
+ * board-noise triage (D5) — a 2-column table of the ticket's kind metadata
+ * (bookkeeping.type/state, parked_under, blocked_reason, disposition). Renders
+ * NOTHING when none of these fields are present (the common case, and every
+ * pre-board-noise ticket) — purely additive, no layout change otherwise.
+ */
+function KindMeta({ ticket }: { ticket: Ticket }) {
+  const rows: Array<[string, string]> = [];
+  if (ticket.kind && ticket.kind !== "work") rows.push(["kind", ticket.kind]);
+  if (ticket.bookkeeping?.type) rows.push(["bookkeeping.type", ticket.bookkeeping.type]);
+  if (ticket.bookkeeping?.state) rows.push(["bookkeeping.state", ticket.bookkeeping.state]);
+  if (ticket.parkedUnder) rows.push(["parked_under", `#${ticket.parkedUnder}`]);
+  if (ticket.blockedReason) rows.push(["blocked_reason", ticket.blockedReason]);
+  if (ticket.disposition) rows.push(["disposition", ticket.disposition]);
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="ak-drawer__kindmeta">
+      <p className="ak-drawer__section">Kind metadata</p>
+      <table className="ak-kindmeta-table">
+        <tbody>
+          {rows.map(([key, value]) => (
+            <tr key={key}>
+              <th scope="row">{key}</th>
+              <td>{value}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

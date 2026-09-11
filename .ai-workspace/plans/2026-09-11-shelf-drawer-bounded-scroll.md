@@ -114,3 +114,40 @@ Independent plan-review (adversarial; did NOT author). Reviewed at head `b91bc16
 2. **red-on-prefix boundary.** `grabAll` captures only the first token after `red-on-prefix=`, so keep the full 7-char `752a531` (passes `>=7` exactly) — a 6-char abbreviation would fail the gate.
 3. **AC-2 desktop cell is weaker by design.** It asserts only `scrollTop` delta>0 at 1440 (not `scrollY==0`); sufficient to prove the body scrolled, and the phone cell carries the "page did not move" claim — acceptable, since the phone is the actual complaint modality.
 
+## Execution Review
+
+Decision: PASS
+
+Independent, adversarial execution-review (STATELESS — did NOT author the plan or the implementation). Verified at PR head sha `5740becf0bcd1888f95935b06c696daf945e6f9a` (PR #83, base `master`, MERGEABLE), against the plan's Binary AC and the full four-leg UI-task gate. Every load-bearing claim was re-measured against the actual diff — the executor's PR body was treated as a claim to disconfirm, not as evidence.
+
+### Named-risk note disposition (receiving-end duty, #2434)
+`node hooks/named-risk-notes.mjs list` printed one carried note for this task.
+
+DISPOSITION shelf-marker-result-reject-wins-2026-09-11 addressed — I replicated the gate's exact `grabAll(key) = /\bkey\s*[:=]\s*(\S+)/gi` parser (`hooks/ui-task-gate.sh:275-317`) against BOTH the shipped interaction-test marker and the ui-evolve verdict at head. Marker `grabAll("result")` = `["PASS","**PASS**."]` → sawPass=true, reject=(none); `grabAll("verdict")` on the marker = `[]`. Verdict structured-line parser (`^\s*(?:decision|verdict)\s*[:=]\s*WORD`) = one `ACCEPT`, zero `ITERATE/REJECT/BLOCK`. The pre-fix "RED" narrative lives only in prose headings and the `red-on-prefix=752a531` field / the separate red-evidence.md — never on a `result:`/`verdict:` token the parser grabs. REJECT-WINS trap is NOT tripped; the gate passes this legitimately-passing implementation.
+
+### Four UI-task gate legs — observed, independently measured
+
+**Leg 1 — AC-2 REAL-INTERACTION RED→GREEN (the load-bearing leg): PASS.**
+- I independently re-ran the RED corpus: throwaway worktree at `752a531` with the pre-fix `app/globals.css` (confirmed byte-level to have NO `max-height`/`overflow-y` on `.ak-shelf[open] > .ak-shelf__body` — an unbounded flex column, no scroll container) + the PR-head spec/fixture. Measured RED at BOTH cells: AC-1 mobile+desktop (`scrollHeight == clientHeight`, overflow not engaged) and AC-2 mobile (real CDP touch swipe → `scrollTop` delta `0`) + AC-2 desktop (real `page.mouse.wheel` → `scrollTop` delta `0`). 4/4 fail as predicted.
+- I independently re-ran the full spec at PR head: `e2e/shelf-scroll.e2e.spec.ts` (12) + `e2e/shelf.e2e.spec.ts` (2) = **14/14 pass** on this machine. AC-2 mobile: real touch swipe advances `scrollTop` while `window.scrollY` stays within ±1px (scroll is INSIDE the drawer, not the page). AC-2 desktop: real wheel advances `scrollTop`.
+- Oracle validity confirmed: AC-2/AC-4 use REAL gestures (`touchDragAt`, `touchDragHorizontalAt`, `page.mouse.wheel`) — never a programmatic `scrollTop=`/`scrollLeft=` write. The `scrollTop=` writes in the spec are confined to AC-3 (reachability) / AC-5 (sticky-position) / AC-6 (hold-out), which are not interaction oracles. The executor's rewrite of AC-4 away from a raw `scrollLeft=` write to real touch-drag/wheel gestures is sound (a JS write is a CSSOM escape hatch no user gesture can trigger).
+
+**Leg 2 — ui-evolve verdict: PASS.** `verdict: ACCEPT`, total 18/20, per-axis 4/3/4/4/4 (no axis <3), on REAL Playwright screenshots at 390×844 and 1440×900. I eyeballed the after-screenshots myself: `mobile-open-at-rest.png` shows the header stat tiles + 4-column board strip staying visible ABOVE the bounded shelf panel (page anchors survive); `mobile-mid-scroll.png` shows the `BOOKKEEPING` group label pinned at the panel's top edge, fully opaque and flush, with the cards paged beneath it and NO card ghosting through above the label. The sticky-ghosting fix (`top: -14px` re-anchoring the sticky label from the padding edge to the container's true visible edge) genuinely holds at the head sha.
+
+**Leg 3 — prod-build 4th leg: PASS.** PR body carries `production-build: agent-kanban@5740becf0bcd1888f95935b06c696daf945e6f9a cmd=npm run build exit=0 dirty=0` — the sha matches the PR head sha exactly, exit=0, dirty=0. agent-kanban is Vercel-linked (PROD_BUILD_GUARD_REPOS).
+
+**Leg 4 — No page horizontal-overflow regression: PASS.** The `html`/`body` `overflow-x:hidden` invariant is preserved (the CSS change is scoped to `.ak-shelf[open] > .ak-shelf__body` and `.ak-shelf__group-label`). The shelf body pins `overflow-x:hidden` as an EXPLICIT horizontal pin, plus `touch-action:pan-y`, `overscroll-behavior:contain`, and `-webkit-overflow-scrolling:touch`. The ceiling is `max-height: 60dvh` — a visual-viewport unit (`dvh`, not `vh`/px), per the overflow-guard-needs-visual-viewport lesson. AC-4 passes at head at both cells: real horizontal gestures over an injected 600px non-shrinkable child leave `body.scrollLeft` and `window.visualViewport.offsetLeft` at `0`.
+
+### Honesty checks — confirmed honestly handled
+- **AC-3 does not independently RED on plain `752a531`:** confirmed and acceptable. The executor discloses this in the red-evidence file with the correct root cause (an unbounded body's box trivially contains every card — nothing is clipped). AC-1 and AC-2 DO discriminate — I re-measured both going RED at the baseline and GREEN at head, so the Rule-17 corpus still has a genuine pre/post discriminator.
+- **Edge-fade cue deliberately not implemented:** plan line 69 explicitly permits shipping the scrollbar rail alone when a pure-CSS fade risks masking the rail. A visible scroll affordance IS present — `scrollbar-width:thin` + `scrollbar-color` + `::-webkit-scrollbar*` rules tinted `--fg-faint` — verified in the CSS and the screenshots. ui-evolve honestly docked axis 2 to 3/4 and filed a follow-up.
+- **Privacy (AC-11):** I isolated the ADDED lines alone (`git diff 752a531..head`, added `+` lines only) and scanned them with the real binary (not the shell shim) for absolute home-directory paths, home usernames, personal email addresses, blob-host tokens, and generic email shape — zero matches (exit 1). The one pre-existing self-exempted home-path doc example lives in `ci.yml`, unrelated to this PR's 8 added lines there. No new home-path/PII introduced by this PR.
+
+### Monotonicity checklist (#1590)
+The only mutual-exclusion arm in the diff is closed-state `.ak-shelf__body { display:none }` (base rule) vs `.ak-shelf[open] > .ak-shelf__body { display:flex; max-height:60dvh; overflow-y:auto }` (open-state rule). These are gated by the `[open]` attribute selector and are mutually exclusive: the stronger open-state claim applies ONLY when the drawer is open and cannot erase the weaker-but-load-bearing closed-state `scrollHeight == 0` contract (AC-1.5), which AC-6 preserves — I re-ran `shelf.e2e.spec.ts` AC-1.5 (closed body `scrollHeight` 0 → >0 on tap) and it passes at head. No last-writer-wins CSS arm competes for these two selectors. The gate's own `result` parser is REJECT-WINS (a FAIL token would beat any later PASS); the shipped marker carries no FAIL/RED token the parser grabs, so there is nothing for a weaker PASS to fail to erase.
+
+### Verdict
+All four gate legs pass on independent measurement; all three honesty checks are honestly handled; the named-risk note is dispositioned and NOT tripped; the operator's reported bug (the 133-card Bookkeeping shelf could not scroll) is genuinely fixed — the opened shelf body is now a bounded, touch-scrollable panel that takes the gesture instead of the page. The 4-role chain is the ship authority.
+
+**Verdict commit lands on PR head branch `agent-kanban-shelf-bookkeeping-drawer-body-unbounded-no-internal-scroll` (was `5740becf0bcd1888f95935b06c696daf945e6f9a`).**
+

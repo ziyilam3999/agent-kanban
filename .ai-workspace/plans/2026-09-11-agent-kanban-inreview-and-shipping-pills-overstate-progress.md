@@ -192,3 +192,32 @@ Non-blocking notes for the executor / execution-review (do NOT re-open the plan 
   and AC-9(b) ui-evolve verdict is produced on REAL renders (not stubbed).
 
 Head reviewed: agent-kanban `ef8764a` (canonical) / ai-brain carrier `e8e3ea66` (byte-identical plan copy).
+
+---
+
+### Execution-review (Round 1) — stateless, adversarial, last line before ship
+
+Decision: PASS
+
+Full verdict artifact: `.ai-workspace/reviews/2026-09-11-agent-kanban-inreview-and-shipping-pills-execution-review.md`
+(byte-identical on the ai-brain carrier branch). I did NOT write this code. Verified against the
+`lib/ui-meta.ts` diff at PR head `2f838ddc9ee9e6a60f5cf60539321109a6c3fee2` and by RUNNING the tests
+myself.
+
+- **Badges key on the current gating signal (quoted diff):** in_review neutral path is now
+  `const verdict = newestExecutionReviewVerdict(ticket);` (comment-position scan of exec-review rows;
+  undefined for an open row → neutral `◆ REVIEW`), replacing `latestReviewVerdict(ticket)`;
+  `isHeld` widened to `Boolean(onHold) && (column === "in_progress" || shippingAfterPass(ticket))`
+  with the in_review branch checking `isHeld()` FIRST; STALE widened to
+  `ageExceedsCap && (sessionDefinitelyDead || verdictTooOld)` with `SHIPPING_STALE_VERDICT_AGE_MS = 24h`.
+- **RED-first reproduced independently:** 13 failed / 10 passed at `1d00251` — exactly the plan's
+  Rule-17 corpus and the executor's red-evidence table. GREEN at head: full suite 512/512, new file
+  24/24, typecheck exit 0, AC-7 = exactly one new test file.
+- **UI-gate legs:** design brief = §Design POV (present); ui-evolve verdict ACCEPT 12/12 on REAL
+  desktop+mobile renders (both PNGs eyeballed — genuine, honest, distinct); `interaction_test_na`
+  cited (specific ≥20-char reason), `interaction_test` not cited → valid leg-scoped N/A. Prod-build
+  marker (`scripts/prod-build-marker.sh <repo-root> --pr 82`, head-bound) is a REQUIRED ship-tail
+  step, not yet present — flagged, not a FAIL (CI `next build` already GREEN on head).
+- **Named-risk notes:** `NO-NOTES` for this task → receiving-end disposition duty skipped.
+
+Head reviewed: agent-kanban PR #82 head `2f838ddc9ee9e6a60f5cf60539321109a6c3fee2`.

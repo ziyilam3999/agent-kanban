@@ -85,6 +85,14 @@ jobs:
       - name: Fold front-screen overflow guard (headless chromium, production-shaped board)
         run: PW_WEB_SERVER=1 npx playwright test e2e/fold-front-screen-overflow.e2e.spec.ts --project=chromium --reporter=list
 
+      # agent-kanban-shelf-bookkeeping-drawer-body-unbounded-no-internal-scroll (AC-10): runs
+      # in the SAME job as the guard above (no extra checkout/install/browser-download cost) —
+      # the plan's cost bound is <=4.5 min total (<=+1.5 min over the guard job alone). Named
+      # explicitly per-file (not a glob) so a future new e2e spec is NOT silently swept into
+      # this cost-bounded job.
+      - name: Shelf bounded-scroll guard (headless chromium, production-volume shelf)
+        run: PW_WEB_SERVER=1 npx playwright test e2e/shelf-scroll.e2e.spec.ts e2e/shelf.e2e.spec.ts --project=chromium --reporter=list
+
   privacy:
     runs-on: ubuntu-latest
     steps:

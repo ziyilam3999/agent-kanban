@@ -587,14 +587,94 @@ button {
   display: none;
 }
 
+/* agent-kanban-shelf-bookkeeping-drawer-body-unbounded-no-internal-scroll —
+   the opened body is its OWN bounded, self-scrolling panel (not an
+   ever-growing column). `max-height` in `dvh` (never `vh`/px — the visual
+   viewport tracks the mobile URL-bar show/hide, `vh` locks to the large
+   viewport and would clip the last card) at roughly half-to-two-thirds of
+   the viewport: tall enough to page a handful of cards, short enough that
+   the board strip above and the page's bottom edge stay visible anchors.
+   Scroll mechanics mirror `.ak-drawer__body` (overscroll-behavior:contain +
+   -webkit-overflow-scrolling:touch) — but NOT its `flex:1 1 auto;
+   min-height:0`, which only exist there because that body is a flex CHILD
+   of a bounded column; this body IS the bounded container, so it scrolls
+   directly. `overflow-x:hidden` is an EXPLICIT pin, not incidental: setting
+   `overflow-y` to a non-visible value implicitly computes `overflow-x` to
+   `auto` too (CSS spec), which would let a future wide child open a
+   horizontal scrollbar inside the panel and break the root `overflow-x:
+   hidden` containment invariant (html L105 / body L117). The thin scrollbar
+   is a deliberate, intentional break from `.ak-strip`'s hidden-scrollbar
+   convention (globals.css:447-452) — a vertical wall of full-width cards
+   offers no "peek" cue, so an honest visible rail is the discoverability
+   fix (design POV §2). */
 .ak-shelf[open] > .ak-shelf__body {
   display: flex;
   flex-direction: column;
   gap: 14px;
   padding: 12px 14px 14px;
   border-top: 1px solid var(--line);
+  max-height: 60dvh;
+  overflow-y: auto;
+  /* Explicit horizontal pin (plan L16/L49, #shelf-drawer-bounded-scroll
+     AC-4): without this, `overflow-y:auto` forces the computed `overflow-x`
+     from `visible` to `auto` too, so a wide child would open a real
+     horizontal scroll track inside the panel. `hidden` blocks that —
+     no horizontal scrollbar, and no USER-GESTURE (touch drag / wheel /
+     keyboard) can move this axis, which is the actual containment
+     invariant AC-4 tests via real touch/wheel gestures. (Measured live:
+     Chromium computes `overflow-x:clip` mixed with `overflow-y:auto` down
+     to `hidden` anyway, and — unlike gesture scrolling — neither value
+     stops a raw `el.scrollLeft = x` JS write from taking effect; that's
+     a CSSOM-level escape hatch, not a real user interaction, so the AC-4
+     oracle drives a genuine touch-drag / wheel gesture, not a JS write.) */
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  scrollbar-width: thin;
+  scrollbar-color: var(--fg-faint) transparent;
 }
 
+.ak-shelf[open] > .ak-shelf__body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ak-shelf[open] > .ak-shelf__body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ak-shelf[open] > .ak-shelf__body::-webkit-scrollbar-thumb {
+  background: var(--fg-faint);
+  border-radius: 4px;
+}
+
+/* Sticky per-kind group label (design POV §4) — at 133 bookkeeping cards
+   the label would otherwise scroll away on the first flick and never
+   return. `position:sticky` pins it to the scroll container's top edge
+   while its own group is in view, and releases at the group's end by
+   construction (scoped to the group wrapper, not the whole panel). Opaque
+   `--panel` background + hairline `--line` bottom border so scrolling
+   cards don't ghost through the pinned label.
+
+   `top: -14px` (measured live, #shelf-drawer-bounded-scroll — a Rule-19
+   eyeball catch on a real mid-scroll screenshot, not something the AC-5
+   bounding-box assertion alone caught): with plain `top: 0`, a sticky
+   element's stuck position anchors to the scroll container's PADDING
+   edge, not its visible clipped (border) edge — so the container's own
+   12px `padding-top` (before the first group) or 14px flex `gap` (before
+   every later group) remained as a permanent, uncovered gap ABOVE the
+   pinned label, inside the container's visible clip area (padding/gap are
+   never clipped — only truly scrolled-past content is), and a card
+   scrolling up through it stayed visible there, ghosting through above
+   the label. (A negative `margin-top` + compensating `padding-top` on the
+   label was tried first — it does NOT work: sticky's offset math re-
+   anchors around the margin box, so a more negative margin is exactly
+   cancelled by a larger computed stuck offset, net zero visual change,
+   confirmed by measurement.) Setting `top` itself to `-14px` instead
+   shifts the anchor to align with the container's true visible (border)
+   edge — covers both the 12px and 14px cases with a couple px to spare;
+   confirmed via `elementFromPoint` at the container's top edge landing on
+   `.ak-shelf__group-label`, not a card, immediately below it. */
 .ak-shelf__group-label {
   font-family: var(--font-mono);
   font-size: 9.5px;
@@ -603,6 +683,12 @@ button {
   text-transform: uppercase;
   color: var(--fg-meta);
   margin: 0 0 8px;
+  position: sticky;
+  top: -14px;
+  z-index: 1;
+  background: var(--panel);
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
 }
 
 .ak-shelf__cards {

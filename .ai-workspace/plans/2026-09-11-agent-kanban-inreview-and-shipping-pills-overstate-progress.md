@@ -108,3 +108,87 @@ Knob A = `delegate` (one worktree, one coherent surface). Knob B = `both`: the n
 - `.ai-workspace/reviews/agent-kanban-inreview-and-shipping-pills-red-evidence.md` (new)
 - `.ai-workspace/reviews/agent-kanban-inreview-and-shipping-pills-ui-evolve-verdict.md` (new)
 - `.ai-workspace/plans/2026-09-11-agent-kanban-inreview-and-shipping-pills-overstate-progress.md` (new) — this plan
+
+## Review
+
+Decision: PASS
+
+Stateless, adversarial plan-review (Round 1). I did NOT author this plan. Reviewed the canonical
+agent-kanban copy at `ef8764a` and the code under review at that head (`lib/ui-meta.ts`), plus every
+named hold-out test at `ef8764a`. Every load-bearing claim below was verified by reading the actual
+code/tests, not the plan's narrative.
+
+**AC-1/AC-2 — in_review pill (gating-role verdict only): VERIFIED SOUND.**
+- RED genuine: traced head code. F-A (plan-review PASS + exec-review OPEN): `shippingAfterPass`=false,
+  `latestReviewVerdict`=`execVerdict ?? planVerdict`=`undefined ?? "PASS"`=`PASS` → head renders
+  `◆ REVIEW · PASS` (defect confirmed). F-B (round-1 FAIL closed, round-2 OPEN): newest exec-review
+  comment is the OPEN row (verdict undefined) → `shippingAfterPass`=false; `latestReviewVerdict` skips
+  the open row and returns round-1 `FAIL` → head renders `◆ REVIEW · FAIL` (defect confirmed).
+- The fix's selector = the newest exec-review COMMENT-position scan (same one `shippingAfterPass` uses),
+  NOT `latestVerdictForRole` (which skips open rows and would keep showing the stale round-1 FAIL — the
+  plan's executor note calls this out correctly). F3 (newest exec-review comment = FAIL, no newer round)
+  still renders `◆ REVIEW · FAIL` — preserved.
+- Does NOT reimplement/touch `latestReviewVerdict`: its 4 unit tests test the function directly and the
+  DONE pill still calls it. Confirmed NO existing `phaseLine` test asserts the blended
+  plan-verdict-on-in_review behavior (`phase.test.ts:80` is executor-only → `◆ REVIEW`;
+  `phase.test.ts:69` is exec-PASS → SHIPPING) — so the in_review selector change breaks no existing test.
+
+**AC-3/AC-6 — hold beats ship + #1867 running-reviewer pin: VERIFIED SOUND, and disjointness holds.**
+- The seam extends `isHeld` to `onHold && (column==='in_progress' || shippingAfterPass(t))`. Verified
+  MONOTONIC against every named hold-out by reading the tests:
+  - `on-hold.test.ts` AC10 (`isHeld(completed+onHold)`) stays false: `shippingAfterPass` requires
+    `status==='in_progress'`; a completed ticket is `status:'completed'` → both disjuncts false. Terminal
+    still wins.
+  - `on-hold.test.ts` AC5/AC6 (in_progress-column fixtures): first disjunct already true → unchanged.
+  - `lane-pending-review-visibility.test.ts` AC-4 (#1867 pin: held + OPEN exec-review): newest
+    exec-review row is open → `shippingAfterPass`=false, column `in_review` → `isHeld`=false → lane still
+    counted. PIN PRESERVED. AC-5 (no onHold) unaffected.
+- Disjointness (components/* unchanged) is SOUND: `Card.tsx:74,85` derive `ak-card--hold` purely from
+  `isHeld(ticket)` (no independent column gate); `Drawer.tsx:294,331` gate the hold chip on
+  `isHeld(ticket)`; `active.ts:506` filters `!isHeld(t)`. Extending `isHeld()` in `lib/ui-meta.ts`
+  propagates the pill + rail + drawer chip + active-set exclusion (AC-3's `computeActiveIds` exclusion of
+  F-C2) WITHOUT editing any component or active.ts. Single-predicate #1816 doctrine intact.
+
+**AC-4/AC-5 — SHIPPING second STALE arm (24h verdict-age): VERIFIED SOUND, #1449 preserved.**
+- The new STALE condition is `ageExceedsCap AND (sessionDead OR verdictOlderThan24h)` — a WEAKENING of
+  the second conjunct (fires in strictly more cases), the intended honesty direction. Verified it does
+  NOT flip any hold-out: `phase.test.ts` #1449 fixtures and `monotonic-flow.test.ts` shipping fixtures
+  all carry a verdict ts of 05:00→NOW 12:00 = **7h < 24h**, so the new arm is INERT for them and the
+  existing `age AND sessionDead` conjunction decides exactly as before (case1 LIVE→SHIPPING,
+  case2 DEAD→STALE, case3 unknown→SHIPPING, back-compat nowMs-omitted→SHIPPING). RED genuine: F-D (5-day
+  verdict, LIVE) renders SHIPPING at head (no 24h bound), STALE after.
+- AC-5(c) F-I (fresh ship-tail board write) keeps `ageExceedsCap` false via the first conjunct →
+  SHIPPING, so a legitimately-live-but-old-PASS tail that re-touches the board is not falsely dimmed
+  (load-bearing assumption 1). Fail-closed on unparseable timestamp (arm inert) matches #1449 bias.
+
+**AC-7 — exactly ONE new test file, no existing-test edits: ACHIEVABLE (this was the highest risk).**
+Confirmed no existing test asserts any behavior the fix changes: the in_review-selector change, the
+`isHeld` extension, and the second STALE arm each leave every named hold-out
+(`phase.test.ts`, `monotonic-flow.test.ts`, `on-hold.test.ts`, `lane-pending-review-visibility.test.ts`,
+`card.test.ts`) green UNEDITED. `card.test.ts` byte-identical baselines are all on the in_review+PASS
+(shipping) fixture, unaffected by the pill/hold changes.
+
+**UI-task gate scoping — HONEST, not a rubber-stamped skip.** Leg-1 satisfied by §Design POV. Leg-2
+ui-evolve is REQUIRED (one round on real renders), and the plan explicitly REJECTS `metadata.ui_gate_skip`
+as the silent skip the gate forbids — proportionate, because the change introduces the ON HOLD visual
+treatment into the REVIEW column (a genuinely new visual state), not merely a verdict string. Leg-3
+`interaction_test_na` reason is specific and defensible (pure text/hue function, no pointer surface).
+Adjudicated: honest scoping, accepted.
+
+**Rule-17 both-ends oracle:** non-vacuous — every RED member produces a materially different (wrong)
+output at head vs the GREEN target (traced), and the GREEN controls are outputs that must not move. The
+oracle can return both RED and GREEN.
+
+Non-blocking notes for the executor / execution-review (do NOT re-open the plan to enumerate defenses):
+- N1 (clarity, self-correcting via the oracle): AC-5(a)/(b) and the F-J/F-J' rows do not state the
+  session-liveness arg. Only a LIVE session makes F-J' (25h) RED-on-head and F-J (23h) a real green
+  control; a DEAD session would let the existing arm decide and leave the new 24h bound untested. Pin
+  `LIVE` explicitly in the new test's F-J/F-J' calls.
+- N2 (named-risk, gaming theorem — registered durably): every finite mechanical AC set admits a
+  fixture-memorizing stub; that is a theorem about AC sets, not a defect in this plan. Execution-review
+  must confirm the diff is a genuine selector+predicate change (newest-exec-review comment-position scan +
+  `isHeld` extended with `shippingAfterPass`), NOT a stub pattern-matching F-A..F-K.
+- N3: execution-review should confirm AC-8 red-evidence actually shows the RED members RED at `1d00251`,
+  and AC-9(b) ui-evolve verdict is produced on REAL renders (not stubbed).
+
+Head reviewed: agent-kanban `ef8764a` (canonical) / ai-brain carrier `e8e3ea66` (byte-identical plan copy).

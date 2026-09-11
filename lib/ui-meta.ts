@@ -2,7 +2,7 @@
 // metadata). One source so the card pips, pipeline meter, and drawer timeline all
 // agree on colors and the canonical 4-role pipeline order.
 
-import type { Column, Ticket } from "./board-schema";
+import type { Column, LedgerComment, Ticket } from "./board-schema";
 import { LIVE_WINDOW_MS } from "./board-schema";
 
 /** CSS-var hue per column — the thin status rail + count tint, never a fill. */
@@ -98,6 +98,20 @@ export function isFailClassVerdict(v: string): boolean {
 export const SHIPPING_STALE_MS = 60 * 60 * 1000;
 
 /**
+ * How old a gating PASS itself may be, on top of the board-write staleness
+ * cap above, before SHIPPING dims to STALE even under a LIVE owning session
+ * (pill-honesty fix, second STALE arm alongside #1449's session-liveness
+ * check). 24 h: the post-PASS ship tail (merge → CI → install → close) is
+ * minutes-scale, so a genuinely quiet PASS this old with a live session is
+ * far more likely a deliberately-parked card with no recorded `onHold` than
+ * an in-flight ship — and a late ship-tail write restores SHIPPING regardless
+ * (the age-gate conjunct, checked first, resets). Same injectable-constant
+ * shape as SHIPPING_STALE_MS: change here, or inject per call via phaseLine's
+ * `shippingStaleVerdictAgeMs` parameter.
+ */
+export const SHIPPING_STALE_VERDICT_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
  * CSS hue for a review verdict, by precedence (most severe first):
  *   BLOCK / FAIL / REJECT                 → red   (--err)
  *   NOTES / WITH-FIX(ES) / WARN           → amber (--review)
@@ -125,18 +139,44 @@ export function verdictHue(v: string): string {
 export const WORK_PIPELINE_ROLES = new Set<string>(["planner", "executor"]);
 
 /**
- * TRUE iff a ticket should render the ON-HOLD treatment (#1816): a non-empty
- * `onHold` reason AND the ticket is still in the `in_progress` column. The
- * column gate is what makes "terminal status wins" (state 4 — AC10) hold by
- * construction: `toColumn` never routes a `completed` task back through
- * `in_progress`, so a stale `onHold` string left on an already-shipped task
- * can never re-trigger the treatment. Single predicate reused by the phase
- * line, the footer age readout, the card's rail/opacity state hook, the
- * drawer chip, and the active-set exclusion — one place decides "is this
- * card actually held," so none of those consumers can drift out of sync.
+ * TRUE iff a ticket should render the ON-HOLD treatment (#1816, widened for
+ * the REVIEW-column pill-honesty fix): a non-empty `onHold` reason AND EITHER
+ * the ticket is still in the `in_progress` column OR it has passed its
+ * gating review and is only waiting on its ship tail (`shippingAfterPass`).
+ * "Hold beats ship" — a card the operator deliberately parked reads as held
+ * even after its review has passed, instead of claiming SHIPPING.
+ *
+ * A ticket whose gating reviewer is still punched in (pending, no verdict —
+ * the #1867 AC-4 shape) is DELIBERATELY excluded from both disjuncts: a
+ * running agent outranks a parked-for-later note, so that card stays neutral
+ * `◆ REVIEW` and keeps its lane. `shippingAfterPass` itself already excludes
+ * a `completed` ticket (status must be `in_progress`), which is what keeps
+ * "terminal status wins" (state 4 — AC10) holding by construction: neither
+ * disjunct can re-trigger on an already-shipped task.
+ *
+ * Single predicate reused by the phase line, the footer age readout, the
+ * card's rail/opacity state hook, the drawer chip, and the active-set
+ * exclusion — one place decides "is this card actually held," so none of
+ * those consumers can drift out of sync.
  */
 export function isHeld(ticket: Ticket): boolean {
-  return Boolean(ticket.onHold) && ticket.column === "in_progress";
+  return (
+    Boolean(ticket.onHold) &&
+    (ticket.column === "in_progress" || shippingAfterPass(ticket))
+  );
+}
+
+/** Shared `⏸ ON HOLD` phase-line shape (#1816, reused for the in_review
+ * column by the pill-honesty fix) — one place builds the text/hue/aria so
+ * the PROG and REVIEW columns can never render it differently. */
+function heldPhaseLine(ticket: Ticket): PhaseLine {
+  const reason = ticket.onHold ?? "";
+  const capped = reason.length > 60 ? `${reason.slice(0, 60)}…` : reason;
+  return {
+    text: "⏸ ON HOLD",
+    hueVar: "var(--hold)",
+    ariaLabel: `on hold — ${capped}`,
+  };
 }
 
 /**
@@ -295,6 +335,51 @@ export function shippingAfterPass(t: Ticket): boolean {
   return !isFailClassVerdict(v);
 }
 
+/**
+ * The verdict of the NEWEST execution-review comment — comment-POSITION scan
+ * (same convention `shippingAfterPass` and `newestExecutionReviewState` use:
+ * comments arrive oldest-first, so the last exec-review match in array order
+ * is the newest), NOT verdict-position. Deliberately different from
+ * `latestVerdictForRole('execution-review')`, which SKIPS an open row with no
+ * verdict and would surface a stale earlier round's verdict while a newer
+ * round is still open — exactly the "in_review pill overstates progress"
+ * defect this selector fixes. Returns undefined both when the newest
+ * exec-review row has no verdict yet (open/pending) AND when there is no
+ * exec-review comment at all — either way the REVIEW-column pill goes
+ * neutral rather than borrowing a verdict that does not belong to the row
+ * currently gating the column. `latestReviewVerdict` is left untouched: the
+ * DONE pill and its own 4 unit tests keep the blended plan-review/
+ * execution-review behavior on purpose.
+ */
+function newestExecutionReviewVerdict(t: Ticket): string | undefined {
+  let v: string | undefined;
+  for (const c of t.comments) {
+    if (c.role === "execution-review") v = c.verdict;
+  }
+  return v;
+}
+
+/**
+ * Age (ms) of the newest execution-review comment's verdict, measured from
+ * `nowMs`. Prefers the comment's `closedAt` (the reviewer's own punch-out
+ * stamp) and falls back to its `ts` when `closedAt` is absent — the same
+ * precedence order the plan specifies. Returns undefined (arm inert, never a
+ * bogus/NaN age) when there is no execution-review comment, or its chosen
+ * timestamp does not parse.
+ */
+function newestExecReviewVerdictAgeMs(t: Ticket, nowMs: number): number | undefined {
+  let newest: LedgerComment | undefined;
+  for (const c of t.comments) {
+    if (c.role === "execution-review") newest = c;
+  }
+  if (!newest) return undefined;
+  const raw = newest.closedAt ?? newest.ts;
+  if (!raw) return undefined;
+  const parsed = Date.parse(raw);
+  if (Number.isNaN(parsed)) return undefined;
+  return nowMs - parsed;
+}
+
 /** Display metadata for a card's phase line — the plain-words "why it's in this lane". */
 export interface PhaseLine {
   text: string;
@@ -336,13 +421,32 @@ export interface PhaseLine {
  * never cries wolf; the #1435 external watchdog is the real net for ships that die.
  * Deriving from the epoch (not a server `live` boolean) keeps this freeze-safe — a
  * genuinely-dead session on a frozen snapshot still reaches STALE as `nowMs` runs.
+ *
+ * `shippingStaleVerdictAgeMs` (optional, defaults to SHIPPING_STALE_VERDICT_AGE_MS)
+ * is the SECOND arm of the STALE disjunction: even a live session's card dims to
+ * STALE once its board-write age exceeds `shippingStaleCapMs` AND the gating PASS
+ * itself (age from the newest execution-review comment's `closedAt`, else `ts`) is
+ * older than this bound — a genuinely quiet PASS this old is more likely a
+ * deliberately-parked card than a live in-flight ship. An unparseable/missing
+ * verdict timestamp leaves this arm inert (never a bogus STALE). A fresh board
+ * write still restores SHIPPING regardless of verdict age (the age-gate conjunct
+ * is checked first and resets).
+ *
+ * `in_review` also checks `isHeld()` FIRST (pill-honesty fix): a deliberately-
+ * parked ticket whose gating review already passed renders the SAME `⏸ ON HOLD`
+ * treatment as a held PROG-column card, never SHIPPING — "hold beats ship". A
+ * ticket whose reviewer is still punched in (no verdict) is never "held" (the
+ * #1867 AC-4 pin), so it falls through to the neutral/pending path below, which
+ * is keyed on the NEWEST execution-review comment (not a blended or stale-round
+ * verdict — see `newestExecutionReviewVerdict`).
  */
 export function phaseLine(
   ticket: Ticket,
   active = false,
   nowMs?: number,
   shippingStaleCapMs = SHIPPING_STALE_MS,
-  sessionLastActive?: number
+  sessionLastActive?: number,
+  shippingStaleVerdictAgeMs = SHIPPING_STALE_VERDICT_AGE_MS
 ): PhaseLine {
   switch (ticket.column) {
     case "todo":
@@ -359,14 +463,7 @@ export function phaseLine(
       // (▶ ◆ ✓ ✕ ⛔). aria-label carries the reason, capped to ~60 chars so a
       // very long reason never balloons the accessible name.
       if (isHeld(ticket)) {
-        const reason = ticket.onHold ?? "";
-        const capped =
-          reason.length > 60 ? `${reason.slice(0, 60)}…` : reason;
-        return {
-          text: "⏸ ON HOLD",
-          hueVar: "var(--hold)",
-          ariaLabel: `on hold — ${capped}`,
-        };
+        return heldPhaseLine(ticket);
       }
       let role: string | undefined;
       for (const c of ticket.comments) {
@@ -392,7 +489,16 @@ export function phaseLine(
       };
     }
     case "in_review": {
-      // Shipping sub-branch FIRST (#1410): passed execution review, ship tail
+      // Hold beats ship, FIRST (pill-honesty fix): a deliberately-parked
+      // ticket whose gating review has already passed reads ON HOLD, not
+      // SHIPPING — the SAME treatment a held PROG-column card gets. isHeld()
+      // already excludes a ticket whose reviewer is still punched in (no
+      // verdict yet — the #1867 AC-4 pin), so that shape falls through to the
+      // neutral REVIEW branch below and keeps its lane.
+      if (isHeld(ticket)) {
+        return heldPhaseLine(ticket);
+      }
+      // Shipping sub-branch NEXT (#1410): passed execution review, ship tail
       // running. `v` is the newest exec-review comment's verdict — the same one
       // shippingAfterPass matched (verdicts are 24-char-capped upstream).
       if (shippingAfterPass(ticket)) {
@@ -400,18 +506,28 @@ export function phaseLine(
         for (const c of ticket.comments) {
           if (c.role === "execution-review" && c.verdict) v = c.verdict;
         }
-        // STALE is a CONJUNCTION (#1449): the card's board-write age exceeds the
-        // cap AND its owning session is DEFINITIVELY not live. A live session (or
-        // UNKNOWN liveness — no session signal, or no clock) fails CLOSED to
-        // SHIPPING so the pill never cries wolf on an actively-shipped card whose
-        // quiet ship tail hasn't touched THIS card's updatedAt.
+        // STALE is a DISJUNCTION on top of the age gate (#1449, widened by the
+        // pill-honesty fix): the card's board-write age must exceed the cap
+        // AND (its owning session is DEFINITIVELY not live OR the gating PASS
+        // itself is older than shippingStaleVerdictAgeMs). A live session with
+        // a still-fresh verdict, or UNKNOWN liveness with a fresh verdict,
+        // fails CLOSED to SHIPPING — the pill never cries wolf on an actively-
+        // shipped card whose quiet ship tail hasn't touched THIS card's
+        // updatedAt. A fresh board write (AC-5c) always wins regardless of
+        // verdict age, because the FIRST conjunct (age > cap) is false.
         const ageExceedsCap =
           nowMs !== undefined && nowMs - ticket.updatedAt > shippingStaleCapMs;
         const sessionDefinitelyDead =
           nowMs !== undefined &&
           sessionLastActive !== undefined &&
           nowMs - sessionLastActive > LIVE_WINDOW_MS;
-        const stale = ageExceedsCap && sessionDefinitelyDead;
+        const verdictAgeMs =
+          nowMs !== undefined
+            ? newestExecReviewVerdictAgeMs(ticket, nowMs)
+            : undefined;
+        const verdictTooOld =
+          verdictAgeMs !== undefined && verdictAgeMs > shippingStaleVerdictAgeMs;
+        const stale = ageExceedsCap && (sessionDefinitelyDead || verdictTooOld);
         return stale
           ? {
               text: `✓ ${v} — STALE`,
@@ -424,7 +540,14 @@ export function phaseLine(
               ariaLabel: `passed review (${v}), shipping`,
             };
       }
-      const verdict = latestReviewVerdict(ticket);
+      // Neutral/pending path — keyed on the NEWEST execution-review comment
+      // (comment-POSITION, the same scan shippingAfterPass uses), NOT
+      // latestReviewVerdict (which blends in an earlier plan-review verdict)
+      // and NOT latestVerdictForRole (which skips an open/verdict-less row
+      // and would surface a stale prior round's verdict). No verdict on the
+      // row that currently gates the column ⇒ neutral REVIEW — the pill
+      // states the current gate, never a memory of an earlier one.
+      const verdict = newestExecutionReviewVerdict(ticket);
       if (!verdict) {
         return {
           text: "◆ REVIEW",

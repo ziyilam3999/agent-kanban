@@ -74,8 +74,10 @@ Tests:       512 passed, 512 total
 
 `npm run typecheck`: exit 0.
 
-Head SHA: recorded in the PR description / commit this file ships in — `git log -1 --format=%H` on
-this branch after the commit that includes this file.
+Head SHA at the commit that carries this file's first version: `43f420d4db3162867dc834d36be5d5cd49ffd92d`.
+The actual PR head may differ slightly if a later commit lands (e.g. a fixup) — resolve via
+`git log -1 --format=%H` on the PR branch; the GREEN run above (512/512) was captured at that same
+commit.
 
 ## AC-7 — scope discipline
 

@@ -145,6 +145,21 @@ interface BuildOpts {
    * (back-compat) — ids stay the short numeric `90${i}` shape.
    */
   productionShaped?: boolean;
+  /**
+   * shelf-drawer-bounded-scroll AC-1..AC-5/AC-8 — opt-in PRODUCTION-VOLUME
+   * shelf board (`Ticket.kind` is a real schema field — lib/ticket-kind.ts /
+   * __tests__/active.test.ts). Adds `bookkeeping` extra `kind:"bookkeeping"`
+   * tickets and `parked` extra `kind:"parked"` tickets, all OPEN
+   * (`status:"pending"`, old timestamps, never live, `column:"todo"` so they
+   * never join the work-only column board — see BoardView.tsx `workVisible`).
+   * When `productionIdShape` is true the FIRST bookkeeping ticket carries
+   * `PRODUCTION_ID_80` as its id and `PRODUCTION_TOKEN_105` appended to its
+   * subject (the production token-shape the S0 fixture's ~14-card shelf
+   * could never exercise). Distinct `sk*` id namespace — never collides with
+   * the live-lane/ctx/longSubject/extraTodo/bigPayload namespaces above.
+   * Undefined => no tickets added (back-compat).
+   */
+  shelfVolume?: { bookkeeping: number; parked: number; productionIdShape?: boolean };
 }
 
 /**
@@ -161,6 +176,7 @@ export function buildBoard({
   bigPayload,
   modelPill,
   productionShaped,
+  shelfVolume,
 }: BuildOpts): Board {
   const now = Date.now();
   const tickets: Ticket[] = [];
@@ -263,6 +279,45 @@ export function buildBoard({
         blockedBy: [],
         comments: [],
         updatedAt: now - (60 + i) * 60_000, // old + never active
+        sessionId: SESSION_ID,
+      });
+    }
+  }
+
+  // shelf-drawer-bounded-scroll — production-volume shelf filler (OPEN,
+  // never live, never in the work-only column board). Distinct `sk*`
+  // namespace, appended last so it never shifts any other block's indices.
+  if (shelfVolume) {
+    const { bookkeeping, parked, productionIdShape } = shelfVolume;
+    for (let i = 0; i < bookkeeping; i++) {
+      const useProdId = Boolean(productionIdShape) && i === 0;
+      const id = useProdId ? PRODUCTION_ID_80 : `skbk${i}`;
+      const baseSubject = `Shelf bookkeeping fixture ticket #${i + 1} of ${bookkeeping} — synthetic production-volume filler`;
+      const subject = useProdId ? `${baseSubject} ${PRODUCTION_TOKEN_105}` : baseSubject;
+      tickets.push({
+        id,
+        subject,
+        description: "",
+        column: "todo",
+        status: "pending",
+        kind: "bookkeeping",
+        blockedBy: [],
+        comments: [],
+        updatedAt: now - (120 + i) * 60_000, // old + never active
+        sessionId: SESSION_ID,
+      });
+    }
+    for (let i = 0; i < parked; i++) {
+      tickets.push({
+        id: `skpk${i}`,
+        subject: `Shelf parked fixture ticket #${i + 1} of ${parked} — synthetic production-volume filler`,
+        description: "",
+        column: "todo",
+        status: "pending",
+        kind: "parked",
+        blockedBy: [],
+        comments: [],
+        updatedAt: now - (120 + bookkeeping + i) * 60_000, // old + never active
         sessionId: SESSION_ID,
       });
     }

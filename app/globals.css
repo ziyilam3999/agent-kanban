@@ -648,6 +648,86 @@ button {
   border-radius: 4px;
 }
 
+/* ---------------------------------------------- Folding-phone front-screen
+   shelf reachability (#2499, candidate B) — base phone tier ONLY, disjoint
+   from the 640-1023.98px grid-tier band's `min-width:640px` gate (L2000-2027
+   / L2029-2060) so this rule can NEVER leak to those shell-clamped tiers or
+   to the >=1024px desktop tier (nr-2499-desktop). Below 640px the page still
+   free-scrolls (unlike the grid tiers' internal-scroll shell — candidate B
+   deliberately does not touch that) — but the COLLAPSED shelf entry itself
+   is pinned to the viewport's bottom edge so it is reachable at rest,
+   without scrolling past the full-height single-column strip above it.
+   Opening it still renders the SAME #83 bounded 60dvh self-scrolling body
+   (`.ak-shelf[open] > .ak-shelf__body` above, byte-for-byte untouched) — the
+   pinned bar simply grows upward as a bottom sheet, no second scroll
+   mechanism introduced.
+
+   `position: sticky` was tried FIRST (it stays in `.ak-main`'s normal flow
+   so it releases back to an ordinary in-flow block once the true page
+   bottom scrolls into view, with no manual height/z-index bookkeeping
+   against the page's dynamic content height) but MEASURED LIVE to be
+   trapped: `html`/`body` both carry `overflow-x: hidden` (L105/L117),
+   which the CSS spec computes to `overflow-y: auto` on both ancestors, and
+   Chromium resolves `.ak-shelf`'s sticky containing block to `<body>`
+   (auto-height, so it never itself scrolls) instead of the viewport — the
+   sticky element simply never engages ("stuck") and renders at its
+   ordinary static flow position, exactly the trap this file's Rule-18 note
+   flagged as a real (not hypothetical) risk. Reproduced empirically by the
+   real Playwright AC1 run (`e2e/shelf-front-screen-reachable.e2e.spec.ts`)
+   BEFORE this fallback was applied — the RED-evidence file records the
+   measured `summary.top` with sticky, still far past `innerHeight`. Per the
+   plan's own sanctioned fallback, this ships as `position: fixed` instead
+   — verified GREEN by the SAME real bounding-rect Playwright assertion
+   (never `getComputedStyle`). */
+@media (max-width: 639.98px) {
+  /* nr-2499-occlusion: reserve room at the bottom of the column strip equal
+     to the pinned collapsed bar's own footprint, so scrolling to the LAST
+     card of a tall column clears the fixed bar instead of the bar visually
+     overlapping it. A generous fixed clearance (not a measured exact px)
+     errs toward extra breathing room over a clipped card. Load-bearing for
+     `position:fixed` too: removing `.ak-shelf` from normal flow means this
+     padding is the ONLY reserved space compensating for its footprint. */
+  .ak-strip.ak-board {
+    padding-bottom: 72px;
+  }
+
+  .ak-shelf {
+    position: fixed;
+    left: 14px;
+    right: 14px;
+    bottom: 0;
+    z-index: 15;
+    margin: 0;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -8px 20px -4px rgba(0, 0, 0, 0.45);
+  }
+
+  /* A small centered grabber pip — the bottom-sheet affordance cue (design
+     POV: signals "this pinned bar is interactive/expandable", distinct from
+     a static footer) — pure decoration, no layout impact. `.ak-shelf`
+     itself is `position: fixed` above, which establishes a containing
+     block for this absolutely-positioned pseudo-element. */
+  .ak-shelf::before {
+    content: "";
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    width: 32px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--fg-faint);
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+
+  /* Extra top clearance so the grabber pip (above) never overlaps the
+     summary text/caret. Same left/right/bottom as the base rule (L548-562);
+     only `padding-top` changes. */
+  .ak-shelf__summary {
+    padding-top: 17px;
+  }
+}
+
 /* Sticky per-kind group label (design POV §4) — at 133 bookkeeping cards
    the label would otherwise scroll away on the first flick and never
    return. `position:sticky` pins it to the scroll container's top edge

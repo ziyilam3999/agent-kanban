@@ -107,3 +107,100 @@ This is a **data-attribution logic** change to a **pure function** (`cardModel` 
 - **No** change to `latestReviewVerdict`, `shippingAfterPass`, `newestExecutionReviewVerdict`, phase-line, or drawer per-role model rendering.
 - **No** dependency on #1495 landing — this fix is independently correct and testable today (fixtures inject a `research` row directly).
 - **No** visual/UI change; **no** new role added to `PIPELINE_ROLES` (research deliberately stays out of the 4-role pipeline — see ui-meta.ts L46–48).
+
+---
+
+## Review
+
+Decision: PASS
+
+Reviewed adversarially and independently (I did not author this plan). Every load-bearing
+claim was verified against the actual `lib/ui-meta.ts` / test / schema at branch HEAD
+`0a7e4e2` (off `origin/master` 5503a41), not the plan's own narrative. Verdict: **PASS** —
+the root-cause is real and correctly located, the RED-first oracle genuinely discriminates
+(MEASURED, not assumed), and the no-regression claim holds. Two non-blocking notes + one
+durable named-risk note for the executor / execution-review below.
+
+**Root-cause — CONFIRMED at source.** `cardModel` (`lib/ui-meta.ts` L292–312): the
+`in_progress` branch (L293–304) IS already role-filtered — it scans backward for the newest
+`WORK_PIPELINE_ROLES` member and decides at the current actor (the #1481 fix). The
+non-`in_progress` branch (L305–311) returns the FIRST comment carrying a `modelVersion`
+regardless of role — genuinely **unfiltered**. `PIPELINE_ROLES` (L25) is the 4 chain roles;
+`research` is deliberately NOT a member (L41–45). The defect and the fix are correctly placed;
+the plan does not touch the already-correct in_progress path (AC4 guards it).
+
+**AC1 RED-on-master — PROVEN by execution (Rule 18), not asserted.** I built the exact
+fixture (a `done` card: planner/plan-review/executor/execution-review chain rows PLUS a
+NEWEST `research` row with a distinct model `claude-haiku-4`) and ran it against master's
+`cardModel`: it returns `{version:"claude-haiku-4"}` — the research model. That is the bug,
+and the test discriminates (on fix it must return the newest CHAIN model, `claude-opus-4-8`).
+
+**AC5 honest-unknown — PROVEN RED on master.** A `done` card whose ONLY model-bearing comment
+is a lone `research` row returns `{version:"claude-haiku-4"}` on master (measured); on fix it
+must be `undefined`. Semantics are sound and match the #1481 "real-time authoritative, not
+backfill/absent default" lesson — rendering nothing beats a wrong attribution.
+
+**AC2 anti-vacuity — sound.** Same fixture minus the research row: newest model-bearing chain
+comment is `execution-review` → `claude-opus-4-8` on BOTH master and fix. Confirms the
+`research` row is the discriminator, not the harness.
+
+**AC6 no-regression — CONFIRMED.** The pre-existing test *"done/in_review -> the newest
+model-bearing comment of ANY role"* (`ui-meta-model.test.ts` L85–102) uses `executor` +
+`execution-review`; its newest commenter is `execution-review`, a `PIPELINE_ROLES` member, so
+a chain-role whitelist still returns `claude-opus-4-8` → stays green. I ran the full
+`ui-meta-model.test.ts` at HEAD: 11/11 pass (baseline). `card.test.ts` model fixtures also use
+`execution-review` (chain role) — unaffected. The e2e `board-fixture.ts` attaches
+`modelVersion` ONLY to the newest work-role (planner/executor) comment and carries no
+non-chain model row, so no rendered badge can flip there. The stale "ANY role" wording is
+correctly handled as a deferred cosmetic follow-up (not required by any AC).
+
+**Monotonicity (#1590).** The change is a pure NARROWING of the non-`in_progress` selector
+(any-role → chain-role membership). It can only REMOVE a wrong attribution (a non-chain model)
+and substitute the correct newest chain model or `undefined`; it never erases a correct
+chain-model attribution, because chain-role comments still qualify. No last-writer-wins /
+clear-list arm is weakened.
+
+**UI-gate N/A — sound.** `cardModel` is a pure function returning a model string; the fix
+changes only WHICH string in the presence of a non-chain model row (which cannot occur on a
+production board until #1495). No layout/CSS/markup/interaction change; the `.ak-model` render
+path in `Card.tsx` is untouched. The correct oracle is the unit suite (AC1–AC6), not a
+rendered screenshot. Data-only judgment upheld.
+
+**Privacy (AC7) — core check verified clean.** Wrapper-immune scan of the plan file with a
+positive control: a `command grep -icE` for a known plan token returned 15 (proves the grep
+runs); the same wrapper-immune scan for the sensitive classes (absolute home-path prefix,
+personal-email user + domain fragments) returned 0. Branch name `1505-cardmodel-role-filter`
+carries no sensitive fragment. No employer / home-path / personal-email token in the plan.
+
+### Non-blocking notes for the executor / orchestrator
+
+1. **AC7 sub-clause cites tooling absent from this repo.** AC7's plan-file-scan sub-clause
+   names `docs/privacy-scan-invocation-contract.md` and `bash scripts/privacy-scan.sh
+   --working <plan-path>` — those live in **ai-brain**, NOT agent-kanban (neither exists here;
+   the only privacy file is a plan doc). AC7's CORE gate — the self-contained wrapper-immune
+   `git diff origin/master...HEAD | command grep -icE '<patterns>' == 0` over diff + branch +
+   PR body — IS executable and is sufficient for this public repo. Executor: satisfy AC7 via
+   that inline `command grep` form (apply it to the plan file too); do not block on the
+   non-existent script.
+
+2. **UI-task-gate completion hook may still fire mechanically.** The plan's UI-gate N/A is
+   correct as a *review* judgment, but `hooks/ui-task-gate.sh` is a fail-closed PreToolUse on
+   `TaskUpdate→completed`. If it matches a `lib/*.ts` / component diff, the orchestrator may
+   need to cite the data-only reason (or `metadata.interaction_test_na`) at the completion
+   seam. This is an orchestration mechanic, not an AC defect.
+
+### Named-risk note (carried durably; decidable only by reading the diff — NOT a blocker)
+
+Registered: `node hooks/named-risk-notes.mjs list --task 1505` →
+`1505-nonprog-filter-must-be-whitelist-not-research-blacklist` (recorded-by plan-review).
+
+The non-`in_progress` filter must be a **`PIPELINE_ROLES` membership WHITELIST**, not a
+research-specific blacklist. AC1 and AC5 exercise ONLY `role:"research"` as the non-chain
+seat, so a memorizing implementation like `if (c.role === "research") continue;` (blacklist)
+would pass **every** AC yet still leak a `ship-tail` / `orchestrator` / any-other non-chain
+model — exactly the class the plan's Intent says to exclude. AC3's `PIPELINE_ROLES` grep
+steers toward the whitelist but is not airtight. Per the round-scope contract, adding more AC
+arms is the next round's attack surface, so this is carried to **execution-review**, where the
+real diff makes "did THIS implementation whitelist on `PIPELINE_ROLES.includes(c.role)`?"
+decidable by reading it. Execution-review: confirm the guard is chain-role membership and
+reject any single-role / research-only exclusion.

@@ -82,7 +82,7 @@ describe("cardModel (#1465 AC5 + AC4 selection rules)", () => {
     expect(cardModel(t)).toBeUndefined();
   });
 
-  it("done/in_review -> the newest model-bearing comment of ANY role", () => {
+  it("done/in_review -> the newest model-bearing comment of ANY chain role", () => {
     const t = ticket("done", [
       {
         role: "executor",
@@ -99,6 +99,99 @@ describe("cardModel (#1465 AC5 + AC4 selection rules)", () => {
       },
     ]);
     expect(cardModel(t)).toEqual({ version: "claude-opus-4-8", effort: "high" });
+  });
+
+  // #1505 AC1 — RED-first, then GREEN. A `done` ticket carries all four
+  // PIPELINE_ROLES comments PLUS a NEWEST `research`-role comment (a non-chain
+  // seat, #1495/#1516) with a DISTINCT model string. On master's unfiltered
+  // non-in_progress branch this returns the research model (the bug); the fix
+  // must return the newest CHAIN-role model instead.
+  it("(#1505 AC1) done card, all 4 chain roles + a newest research row -> the chain model, never research's", () => {
+    const t = ticket("done", [
+      {
+        role: "planner",
+        ts: "2026-09-17T01:00:00.000Z",
+        modelVersion: "claude-opus-4-8",
+        modelTier: "opus",
+      },
+      {
+        role: "plan-review",
+        ts: "2026-09-17T02:00:00.000Z",
+        modelVersion: "claude-opus-4-8",
+        modelTier: "opus",
+      },
+      {
+        role: "executor",
+        ts: "2026-09-17T03:00:00.000Z",
+        modelVersion: "claude-opus-4-8",
+        modelTier: "opus",
+      },
+      {
+        role: "execution-review",
+        ts: "2026-09-17T04:00:00.000Z",
+        modelVersion: "claude-opus-4-8",
+        modelTier: "opus",
+      },
+      {
+        role: "research",
+        ts: "2026-09-17T05:00:00.000Z",
+        modelVersion: "claude-haiku-4",
+        modelTier: "haiku",
+      },
+    ]);
+    expect(cardModel(t)).toEqual({ version: "claude-opus-4-8", effort: undefined });
+  });
+
+  // #1505 AC2 — anti-vacuity control. Same fixture as AC1 with the research
+  // row removed (four chain roles only). Passes on BOTH master and the fix
+  // branch — proving the research row itself is the RED/GREEN discriminator,
+  // not an incidental fixture difference.
+  it("(#1505 AC2) anti-vacuity control — same fixture minus the research row -> still the chain model (passes on master too)", () => {
+    const t = ticket("done", [
+      {
+        role: "planner",
+        ts: "2026-09-17T01:00:00.000Z",
+        modelVersion: "claude-opus-4-8",
+        modelTier: "opus",
+      },
+      {
+        role: "plan-review",
+        ts: "2026-09-17T02:00:00.000Z",
+        modelVersion: "claude-opus-4-8",
+        modelTier: "opus",
+      },
+      {
+        role: "executor",
+        ts: "2026-09-17T03:00:00.000Z",
+        modelVersion: "claude-opus-4-8",
+        modelTier: "opus",
+      },
+      {
+        role: "execution-review",
+        ts: "2026-09-17T04:00:00.000Z",
+        modelVersion: "claude-opus-4-8",
+        modelTier: "opus",
+      },
+    ]);
+    expect(cardModel(t)).toEqual({ version: "claude-opus-4-8", effort: undefined });
+  });
+
+  // #1505 AC5 — honest-unknown boundary. A `done` ticket whose ONLY
+  // model-bearing comment is a lone non-chain `research` row -> undefined
+  // (badge renders nothing). Proves the filter is MEMBERSHIP ("is this a
+  // chain role?"), not merely "skip exactly one research row" — there is no
+  // chain-role model to fall back to here, so it must never borrow the
+  // research model. RED on master (returns the research model there too).
+  it("(#1505 AC5) done card whose ONLY model-bearing comment is a non-chain research row -> undefined, never borrowed", () => {
+    const t = ticket("done", [
+      {
+        role: "research",
+        ts: "2026-09-17T01:00:00.000Z",
+        modelVersion: "claude-haiku-4",
+        modelTier: "haiku",
+      },
+    ]);
+    expect(cardModel(t)).toBeUndefined();
   });
 
   // #1481 T2(a) — the CURRENT actor (newest work-role comment) is the executor and

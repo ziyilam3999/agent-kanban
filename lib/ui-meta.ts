@@ -138,6 +138,17 @@ export function verdictHue(v: string): string {
  * already use, so the bar never disagrees with them about "who is a work role." */
 export const WORK_PIPELINE_ROLES = new Set<string>(["planner", "executor"]);
 
+/** Set form of PIPELINE_ROLES for O(1) chain-role MEMBERSHIP checks (#1505) —
+ * mirrors the same local-Set-over-PIPELINE_ROLES pattern already used in
+ * active.ts / build-board.ts. Used by cardModel's non-`in_progress` branch to
+ * WHITELIST which roles' model-tagged comments may attribute the card's
+ * badge: a research / ship-tail / orchestrator / any other non-chain seat's
+ * comment must never be selected, no matter how new. Deliberately a
+ * membership test against the canonical 4-role set, NOT a single-role
+ * (e.g. `role === "research"`) blacklist — a blacklist would still leak any
+ * future non-chain role that isn't `research`. */
+const PIPELINE_ROLE_SET = new Set<string>(PIPELINE_ROLES);
+
 /**
  * TRUE iff a ticket should render the ON-HOLD treatment (#1816, widened for
  * the REVIEW-column pill-honesty fix): a non-empty `onHold` reason AND EITHER
@@ -280,14 +291,25 @@ export function formatCardModel(m: CardModel): string {
  *                  to an EARLIER work-role comment's model (#1481: doing so
  *                  showed a completed planner's model on an in-flight
  *                  executor's card — wrong-actor attribution, not a fallback).
- *   otherwise   -> the newest model-bearing comment, any role (a finished/queued
- *                  card cares about "who last touched it", not liveness).
+ *   otherwise   -> the newest model-bearing comment left by a CHAIN role — a
+ *                  PIPELINE_ROLES member (planner/plan-review/executor/
+ *                  execution-review). A finished/queued card cares about "who
+ *                  last did the pipeline work", not "who touched it last" —
+ *                  a non-chain seat's comment (research, ship-tail,
+ *                  orchestrator, or any other free-form role) is skipped
+ *                  entirely, even when it is the newest comment on the card,
+ *                  never borrowed as a fallback (#1505: the in_progress
+ *                  branch above already learned this lesson in #1481; this
+ *                  branch did not, until now — a non-chain seat's model must
+ *                  never be attributed to the card as if it were chain work).
  * effort rides ONLY on the same comment as its modelVersion (effort-alone is
  * meaningless — design brief §4 Partial state) — enforced structurally here
  * because both fields are read off the SAME matched comment.
  * Returns undefined when the selected comment (in_progress: current actor;
- * otherwise: newest model-bearing comment) carries no modelVersion — the
- * card/drawer then renders NOTHING (no empty pill, no dangling separator).
+ * otherwise: newest CHAIN-role model-bearing comment) carries no modelVersion,
+ * OR when no chain-role comment carries one at all — the card/drawer then
+ * renders NOTHING (no empty pill, no dangling separator, no borrowed
+ * non-chain attribution).
  */
 export function cardModel(ticket: Ticket): CardModel | undefined {
   if (ticket.column === "in_progress") {
@@ -304,7 +326,11 @@ export function cardModel(ticket: Ticket): CardModel | undefined {
   }
   for (let i = ticket.comments.length - 1; i >= 0; i--) {
     const c = ticket.comments[i];
-    if (c.modelVersion) {
+    // Chain-role MEMBERSHIP whitelist (#1505) — never a `role === "research"`
+    // blacklist, which would still leak a ship-tail/orchestrator/any other
+    // non-chain seat's model. Non-chain comments are skipped entirely, not
+    // merely treated as a lower-priority fallback.
+    if (PIPELINE_ROLE_SET.has(c.role) && c.modelVersion) {
       return { version: c.modelVersion, effort: c.effort };
     }
   }

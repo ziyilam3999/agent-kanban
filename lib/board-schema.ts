@@ -129,6 +129,19 @@ export interface Ticket {
   blockedReason?: string;
   /** Present on any closed/re-kinded ticket carrying a disposition (redacted). */
   disposition?: string;
+  /**
+   * kanban-live-lanes-visibility — TRUE only on a ticket SYNTHESIZED directly
+   * from a 3-role ledger file that has no backing task card anywhere (global
+   * absence — see `lib/build-board.ts` `buildLedgerOnlyTicket`). There is no
+   * real `~/.claude/tasks/<session>/<id>.json` behind it: it exists ONLY
+   * while the lane is genuinely live and disappears again once the work is
+   * done or dead — never a lingering pseudo-card. Absent on every card-backed
+   * ticket (back-compat: an old snapshot, and every ordinary card, carries no
+   * `ledgerOnly` key at all — `schema` stays `1`). Consumed by
+   * `detectOrphanBacklog` to exclude a ledger-only lane from the migrate
+   * nudge: there is no card to migrate.
+   */
+  ledgerOnly?: boolean;
 }
 
 /** A selectable session (one board). */

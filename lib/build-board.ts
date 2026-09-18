@@ -27,7 +27,16 @@ import { resolveTicketKind } from "./ticket-kind";
 // require cycle: active.ts imports only ./board-schema (type) + ./ui-meta,
 // and this module already imports ./ui-meta — see the Round-1 plan-review N1
 // note in .ai-workspace/plans/2026-08-23-board-inprogress-recency-guard.md.
-import { INFLIGHT_LANE_CAP_MS } from "./active";
+// kanban-live-lanes-visibility — buildLedgerOnlyTicket (below) needs the SAME
+// per-ticket liveness predicates computeActiveIds uses (chainInFlight +
+// openPunchInClock + the two windows), so a ledger-only lane's eligibility can
+// never disagree with the view's own "is this genuinely live right now" read.
+import {
+  ACTIVE_WINDOW_MS,
+  INFLIGHT_LANE_CAP_MS,
+  chainInFlight,
+  openPunchInClock,
+} from "./active";
 
 /** The canonical pipeline roles as a set (orchestrator is NOT a member). */
 const PIPELINE_ROLE_SET = new Set<string>(PIPELINE_ROLES);
@@ -444,6 +453,79 @@ export function buildTicket(
   return ticket;
 }
 
+/**
+ * kanban-live-lanes-visibility — synthesize a ticket-shaped lane from a 3-role
+ * ledger file that has NO backing task card ANYWHERE (global absence — the
+ * caller, `scripts/export-board.ts`, owns that global-absence check; this
+ * function trusts its `taskId` input is already eligible on that axis, per
+ * the ledger-only lane contract's clause i/ii).
+ *
+ * Reuses `buildTicket` VERBATIM (plan-review non-blocking note 1): the ledger
+ * file's own mtime is passed as BOTH `mtimeMs` and `ledgerMtimeMs`, so
+ * `updatedAt = Math.max(ledgerMtimeMs, ledgerMtimeMs) === ledgerMtimeMs` — the
+ * REAL filesystem mtime the ledger-writing hooks set, never a minted `now`
+ * (there is no task file to read a mtime from at all).
+ *
+ * The synthesized `subject` carries the id AND a visible "no ticket" marker
+ * (`${taskId} — no ticket (ledger-only lane)`) chosen to NOT start with any
+ * `resolveTicketKind` FALLBACK_PREFIXES token (plan-review non-blocking note
+ * 2 — `RESTORE:` / `[reversible-op RESTORE]` / `[hygiene]` / `[SHELVED` /
+ * `[PARKED` all map to a non-`work` kind, and a non-`work` kind is dropped by
+ * `isDisplayWork` in `computeActiveIds`, which would silently fail AC-1's
+ * `activeIds ⊇ ["lane-x"]`). No `metadata.kind` is set, so `resolveTicketKind`
+ * falls through its subject-prefix table to the `"work"` default. `status` is
+ * set directly to `"in_progress"` (a ledger-only lane is never "pending" or
+ * "completed" — it exists only while genuinely live), so `toColumn` derives
+ * `in_progress` or `in_review` from the ledger's own execution-review state,
+ * exactly as it would for a card-backed ticket.
+ *
+ * Returns `null` when the lane is NOT currently live by the board's OWN
+ * per-ticket liveness rules (the eligibility contract's clause iii): an open
+ * punch-in within `INFLIGHT_LANE_CAP_MS` (`chainInFlight` + the OPC cap — the
+ * SAME predicate `computeActiveIds`' disjunct 1 uses) OR any row within
+ * `ACTIVE_WINDOW_MS` (disjunct 3 — the same handoff-gap grace a card-backed
+ * lane gets). A finished/dead ledger-only lane therefore produces NOTHING —
+ * never a stale pseudo-card (AC-2's core anti-phantom guarantee). This
+ * deliberately does NOT replicate computeActiveIds' disjunct 2 (the
+ * unconditional "current focus" grant) — that grant is a whole-board,
+ * cross-ticket comparison the exporter cannot make one ledger file at a time,
+ * and the contract's own eligibility clause is stated purely in terms of
+ * clauses i-iii (in-flight-under-cap OR within-window), not disjunct 2.
+ */
+export function buildLedgerOnlyTicket(
+  taskId: string,
+  ledgerLines: RawLedgerLine[],
+  ledgerMtimeMs: number,
+  sessionId: string,
+  nowMs: number
+): Ticket | null {
+  const rawTask: RawTask = {
+    id: taskId,
+    subject: `${taskId} — no ticket (ledger-only lane)`,
+    description: "",
+    status: "in_progress",
+    blocks: [],
+    blockedBy: [],
+  };
+  const ticket = buildTicket(
+    rawTask,
+    ledgerLines,
+    ledgerMtimeMs,
+    sessionId,
+    ledgerMtimeMs,
+    nowMs
+  );
+  ticket.ledgerOnly = true;
+
+  const inFlight = chainInFlight(ticket);
+  const opc = openPunchInClock(ticket);
+  const capAgeMs = opc !== undefined ? nowMs - opc : nowMs - ticket.updatedAt;
+  const withinCap = inFlight && capAgeMs <= INFLIGHT_LANE_CAP_MS;
+  const withinWindow = nowMs - ticket.updatedAt <= ACTIVE_WINDOW_MS;
+
+  return withinCap || withinWindow ? ticket : null;
+}
+
 /** Human-friendly relative-time fragment, e.g. "just now", "2m", "3h", "5d". */
 function relTime(diffMs: number): string {
   if (diffMs < 60_000) return "just now";
@@ -521,6 +603,10 @@ export function detectOrphanBacklog(
     // live sessions and unknown ids are skipped.
     if (liveById.get(sid) !== false) continue;
     if (!OPEN_COLUMNS.has(t.column)) continue; // terminal (done) — not open
+    // kanban-live-lanes-visibility (AC-5) — a ledger-only lane has NO card to
+    // migrate: it is a synthesized in-flight display, not a stranded backlog
+    // item, so it must never fire the wrong-direction "migrate this" nudge.
+    if (t.ledgerOnly) continue;
     counts.set(sid, (counts.get(sid) ?? 0) + 1);
   }
 

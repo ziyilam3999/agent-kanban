@@ -101,8 +101,28 @@ html {
      finger drag the whole page sideways even while `window.scrollX` stays 0.
      This is the document-ROOT half of the containment invariant (Intent #2):
      it holds regardless of WHICH descendant overflows, so a future overflow
-     source is contained too (AC-3), not just today's lane-id fix. */
-  overflow-x: hidden;
+     source is contained too (AC-3), not just today's lane-id fix.
+
+     kanban-board-chrome-pinning (X1, root cause): `overflow-x: hidden` here
+     and on `body` below is exactly what traps `.ak-header`'s `position:
+     sticky` (globals.css below) on the page-scroll tiers (<640px, >=1024px).
+     Per the CSS Overflow Module resolved-overflow algorithm, when one axis
+     computes to a SCROLLING value (hidden/auto/scroll) and the other to a
+     NON-scrolling value (visible), the non-scrolling axis is forced to
+     `auto` too — so `body`'s untouched `overflow-y` silently became `auto`,
+     making `<body>` its own (never-actually-scrolling, content-sized) scroll
+     container and resolving every descendant sticky element's containing
+     block to `<body>` instead of the viewport. `clip` is a NON-scrolling
+     value for this same algorithm (grouped with `visible`), so swapping
+     `hidden` -> `clip` on both axes here stops that propagation — body's
+     `overflow-y` stays `visible`, the viewport itself resumes providing
+     scroll (the CSS spec's root-element `visible` -> viewport `auto`
+     exception, the SAME mechanism this app relied on before 2026-09-05's
+     `2de17545`) — while `clip` still visually clips horizontal overflow
+     exactly like `hidden` did (measured live: `document.scrollingElement`
+     `scrollWidth <= clientWidth` holds unchanged; `e2e/fold-front-screen-
+     overflow.e2e.spec.ts` is the containment oracle re-run on every push). */
+  overflow-x: clip;
 }
 
 body {
@@ -114,7 +134,9 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   position: relative;
-  overflow-x: hidden;
+  /* kanban-board-chrome-pinning (X1): see the matching comment on `html`
+     above — `clip` (not `hidden`) is load-bearing for un-trapping sticky. */
+  overflow-x: clip;
 }
 
 /* Atmosphere layer 1 — faint dotted grid + soft vignette (fixed, behind all). */
@@ -460,6 +482,27 @@ button {
   gap: 10px;
 }
 
+/* kanban-board-chrome-pinning (X1) — base rule UNCHANGED from `c656df5`
+   (`position: sticky` with no `top` — inert, exactly as it always was). A
+   real-gesture measurement (this task's own e2e run) caught a SECOND,
+   structural trap: `.ak-strip`'s `overflow-x: auto` (needed for the phone
+   tier's horizontal column snap-scroll) forces its OWN `overflow-y` to a
+   scrolling value too (the SAME CSS Overflow Module resolved-overflow
+   algorithm that trapped `.ak-header` at the root — see the `html`/`body`
+   comment above — applies to ANY element, not just the root), which makes
+   `.ak-strip` — not the viewport — the sticky containing block for every
+   `.ak-col__head` descendant on the phone tier and the 640-767.98px
+   landscape gap (`.ak-strip` never itself scrolls vertically, so a sticky
+   `top` offset relative to it never tracks the real page scroll — measured
+   live: a 390x844 touch drag moved the "stuck" head by ~700px, i.e. not
+   stuck at all). A `getComputedStyle` check would have missed this — it
+   still reports `position: sticky`. Contiguity on those two ranges is
+   instead owned by the NEW `.ak-col-heads-mobile` element below (a sibling
+   of `.ak-strip`, so it has no such ancestor). Desktop (>=1024px) has no
+   trap — `.ak-strip{overflow-x:visible}` there (own media block below)
+   matches on both axes, so THIS rule's sticky/top is safely activated
+   there, scoped to that one block only. The 640-1023.98px grid tiers keep
+   their OWN pre-existing `top: 0` (unaffected either way — untouched). */
 .ak-col__head {
   display: flex;
   align-items: center;
@@ -468,7 +511,33 @@ button {
   position: sticky;
 }
 
-.ak-col__rail {
+/* kanban-board-chrome-pinning (X1) — the sticky top strip's hoisted heading
+   for the tiers where `.ak-col__head` itself cannot be the sticky element
+   (see the comment above): phone (<640px) and the 640-767.98px landscape
+   gap. A single row, sibling of `.ak-strip.ak-board` (never its descendant
+   — that's the whole point), showing the CURRENTLY VISIBLE column's
+   rail+label+count (BoardView.tsx tracks `activeCol` already, for the dots
+   component — reused here, not duplicated). Hidden at the grid tiers (own
+   shell already keeps `.ak-col__head` correctly stuck per-column) and at
+   desktop (all 4 `.ak-col__head`s are visible + correctly sticky at once
+   there — a single hoisted heading would be redundant / wrong shape). */
+.ak-col-heads-mobile {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 16px 2px;
+  position: sticky;
+  top: var(--ak-header-h, 96px);
+  z-index: 20;
+  background: var(--ink);
+}
+
+/* `.ak-col-heads-mobile__*` (BoardView.tsx's hoisted heading) shares this
+   exact visual treatment via a joined selector list — kept as SEPARATE
+   class names from `.ak-col__*` (never merged) because `e2e/shelf.e2e.spec.ts`
+   counts `.ak-col__count` elements and asserts exactly 4. */
+.ak-col__rail,
+.ak-col-heads-mobile__rail {
   width: 3px;
   height: 15px;
   border-radius: 2px;
@@ -476,7 +545,8 @@ button {
   flex: 0 0 auto;
 }
 
-.ak-col__name {
+.ak-col__name,
+.ak-col-heads-mobile__name {
   font-family: var(--font-mono);
   font-size: 11.5px;
   font-weight: 600;
@@ -485,7 +555,8 @@ button {
   color: var(--fg);
 }
 
-.ak-col__count {
+.ak-col__count,
+.ak-col-heads-mobile__count {
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
@@ -680,6 +751,29 @@ button {
    — verified GREEN by the SAME real bounding-rect Playwright assertion
    (never `getComputedStyle`). */
 @media (max-width: 639.98px) {
+  /* kanban-board-chrome-pinning (X3, Goal #4 — height budget) — a COMPACT
+     variant of the SAME `.ak-meter` stat tiles (never hidden: `e2e/fold-
+     front-screen-overflow.e2e.spec.ts` AC-5 asserts `.ak-meter` stays
+     `toBeVisible()` at 390x844 — a pre-existing, master-green assertion the
+     AC-9 delta rule forbids regressing, so swapping to the grid tiers'
+     `.ak-meterbar` instead was REJECTED here even though it reads as the
+     more obvious reuse). Trims margin/padding/font — never structure — to
+     reclaim the ~25px the pinned top strip needs to fit the 200px budget.
+     Load-bearing for AC-5: pinning the top strip makes its height a
+     permanent, ever-present budget line (not just scrolled-past chrome). */
+  .ak-meter {
+    margin: 4px 0;
+  }
+
+  .ak-meter__seg {
+    padding: 4px 8px 5px;
+    gap: 2px;
+  }
+
+  .ak-meter__count {
+    font-size: 16px;
+  }
+
   /* nr-2499-occlusion: reserve room at the bottom of the column strip equal
      to the pinned collapsed bar's own footprint, so scrolling to the LAST
      card of a tall column clears the fixed bar instead of the bar visually
@@ -725,6 +819,62 @@ button {
      only `padding-top` changes. */
   .ak-shelf__summary {
     padding-top: 17px;
+  }
+}
+
+/* kanban-board-chrome-pinning (X2, Goal #1) — the SAME pinned-bottom-bar
+   mechanism as the phone tier above, extended to the two ranges that were
+   NOT already covered: the 640-1023.98px grid tiers already keep the bar
+   in-viewport for free (their `.ak-app{height:100dvh}` shell + flex-column
+   `.ak-main` puts `<Shelf>` at the natural bottom of a height-clamped
+   column — untouched, no rule needed here), but (a) the 640-767.98px
+   LANDSCAPE gap (width >=640 excludes the phone media query above; the
+   grid tiers' own landscape floor only starts at 768cqw, so a landscape
+   viewport in this narrow band gets no shell AND no pin today) and (b) the
+   >=1024px desktop tier (measured live at HEAD: `.ak-shelf` sits in normal
+   page flow ~69400px down a real board — effectively unreachable) both
+   free-scroll with zero pinning. X5: reuse the identical `position:fixed;
+   bottom:0` strategy (no second, divergent pinning mechanism) and the same
+   occlusion-reserve idiom (nr-2499-occlusion) so the last card of the
+   tallest column always clears the bar (AC-3b). */
+@media (min-width: 640px) and (max-width: 767.98px) and (orientation: landscape) {
+  .ak-strip.ak-board {
+    padding-bottom: 64px;
+  }
+
+  .ak-shelf {
+    position: fixed;
+    left: 14px;
+    right: 14px;
+    bottom: 0;
+    z-index: 15;
+    margin: 0;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -8px 20px -4px rgba(0, 0, 0, 0.45);
+  }
+}
+
+@media (min-width: 1024px) {
+  .ak-strip.ak-board {
+    padding-bottom: 64px;
+  }
+
+  .ak-shelf {
+    position: fixed;
+    /* `.ak-app` centers itself at `max-width:1320px; margin:0 auto` (base
+       rule, above) — mirror that exact centering math for the fixed bar's
+       inset instead of a flat viewport-edge value, so the bar's edges line
+       up with the 4-up column grid above it rather than spanning the full
+       (often much wider) browser window. `max()` keeps the same 14px floor
+       the phone tier uses once the viewport is close to the 1024px floor
+       (`.ak-app` isn't yet width-constrained there). */
+    left: max(14px, calc((100vw - 1320px) / 2 + 14px));
+    right: max(14px, calc((100vw - 1320px) / 2 + 14px));
+    bottom: 0;
+    z-index: 15;
+    margin: 0;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -8px 20px -4px rgba(0, 0, 0, 0.45);
   }
 }
 
@@ -2104,6 +2254,14 @@ button {
     min-height: 0;
     overflow: hidden;
   }
+
+  /* kanban-board-chrome-pinning (X1) — the grid-tier shell already keeps
+     each `.ak-col__head` correctly stuck (own per-column scroller, `top:0`
+     rules further below); the hoisted phone/landscape-gap heading has no
+     job here. */
+  .ak-col-heads-mobile {
+    display: none;
+  }
 }
 
 @media (min-width: 640px) and (max-width: 1023.98px) {
@@ -2399,6 +2557,31 @@ button {
   }
 
   .ak-dots {
+    display: none;
+  }
+
+  /* kanban-board-chrome-pinning (Goal #4 — height budget, no growth over
+     HEAD's un-pinned 178px): a couple of px of `.ak-meter`'s own vertical
+     margin, trimmed only here (the pinned top strip's height is now a
+     permanent budget line on every scroll, not just scrolled-past chrome). */
+  .ak-meter {
+    margin: 10px 0;
+  }
+
+  /* kanban-board-chrome-pinning (X1) — desktop is the ONE base-tier width
+     where `.ak-col__head`'s OWN sticky can safely activate: `.ak-strip`
+     is `overflow-x: visible` here (just above), matching `overflow-y`
+     (also visible) — no axis mismatch, so no forced scroll-container
+     propagation traps it (see the `.ak-col__head` base-rule comment). All
+     4 heads stick together at the same offset; the hoisted mobile heading
+     (`.ak-col-heads-mobile`) is irrelevant here and stays hidden. */
+  .ak-col__head {
+    top: var(--ak-header-h, 96px);
+    z-index: 20;
+    background: var(--ink);
+  }
+
+  .ak-col-heads-mobile {
     display: none;
   }
 

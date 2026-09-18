@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useReducedMotion } from "motion/react";
 import type { Board, Column, Ticket } from "@/lib/board-schema";
 import { COLUMNS, COLUMN_LABELS } from "@/lib/board-schema";
+import { COLUMN_HUE } from "@/lib/ui-meta";
 import { computeActiveIds } from "@/lib/active";
 import { deriveLanes } from "@/lib/lanes";
 import { decideLaneReveal } from "@/lib/lane-reveal";
@@ -113,6 +114,36 @@ export function BoardView({ initial }: { initial: Board }) {
   // itself (not a wrapper) so `scroll-margin-top` applies to the right element.
   const panelRef = useRef<HTMLElement>(null);
   const arriveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // kanban-board-chrome-pinning (X1) — the sticky top strip's REAL rendered
+  // height, measured live (never hard-coded — the 2026-07-03 cairn lesson:
+  // a fixed `top:<px>` on the column heads breaks the moment the header wraps
+  // to 2 rows, e.g. the <=640px lane-counter wrap at globals.css L1210-1228).
+  // `.ak-header` is the `data-ak-chrome="top"` region; `.ak-col__head`'s own
+  // sticky `top` offset reads this CSS custom property (globals.css) so it
+  // always sits flush under whatever height the header ACTUALLY rendered at,
+  // on every viewport and after every content change (pill wrap, lane count).
+  const headerRef = useRef<HTMLElement>(null);
+  const appRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const headerEl = headerRef.current;
+    const appEl = appRef.current;
+    if (!headerEl || !appEl) return;
+    const setVar = () => {
+      appEl.style.setProperty("--ak-header-h", `${headerEl.getBoundingClientRect().height}px`);
+    };
+    setVar();
+    // jsdom (the jest test env) has no `ResizeObserver` global (plan risk r5's
+    // "no automated jsdom proof for real-layout reads" — the same class as
+    // `isAlreadyInViewport`'s all-zero-rect tolerance above). A one-shot
+    // `setVar()` still runs there (jsdom's zero rect matches the CSS
+    // fallback `var(--ak-header-h, 96px)` already tolerates); real browsers
+    // (every Playwright/production target) always have `ResizeObserver`.
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(setVar);
+    ro.observe(headerEl);
+    return () => ro.disconnect();
+  }, []);
 
   // ---- Poll the API, diff each snapshot, flag movers + new tickets ----
   useEffect(() => {
@@ -457,11 +488,11 @@ export function BoardView({ initial }: { initial: Board }) {
     : null;
 
   return (
-    <div className="ak-app">
+    <div className="ak-app" ref={appRef}>
       <h1 className="ak-sr-only">
         agent-kanban — live board for {currentSession?.label ?? "the current session"}
       </h1>
-      <header className="ak-header">
+      <header className="ak-header" ref={headerRef} data-ak-chrome="top">
         <div className="ak-header__row">
           <div className="ak-brand">
             <SessionPicker
@@ -505,6 +536,37 @@ export function BoardView({ initial }: { initial: Board }) {
             arrive={arrive}
           />
         )}
+
+        {/* kanban-board-chrome-pinning (X1) — hoisted top-strip heading for
+            the phone tier + the 640-767.98px landscape gap ONLY (CSS-hidden
+            at the grid tiers and at desktop — globals.css). A sibling of
+            `.ak-strip.ak-board`, deliberately NOT its descendant: `.ak-strip`
+            carries `overflow-x:auto` there (real horizontal column-snap
+            scroll), which the CSS Overflow Module's resolved-overflow
+            algorithm forces into ALSO being a vertical scroll container
+            (the exact same trap this task fixed at the document root) — any
+            `position:sticky` descendant of `.ak-strip` would stick to
+            `.ak-strip`'s own (never-scrolling) box, not the viewport. Shows
+            the CURRENTLY VISIBLE column (`activeCol`, already tracked for
+            the dots below) so it always matches whichever column is
+            horizontally in view. */}
+        <div className="ak-col-heads-mobile" aria-hidden="true">
+          {/* Distinct class names from BoardColumn.tsx's `.ak-col__*` triplet
+              (rail/name/count) on PURPOSE — `e2e/shelf.e2e.spec.ts` (AC-1.4/
+              AC-1.5, pre-existing, master-green) counts `.ak-col__count`
+              elements and asserts exactly 4 (one per real column); reusing
+              that class here would silently make it 5 and break an
+              unrelated, already-shipped assertion (AC-9's delta rule). CSS
+              below gives these the identical visual treatment via a shared
+              selector list, not shared class names. */}
+          <span
+            className="ak-col-heads-mobile__rail"
+            aria-hidden
+            style={{ ["--hue" as string]: COLUMN_HUE[COLUMNS[activeCol]] }}
+          />
+          <span className="ak-col-heads-mobile__name">{COLUMN_LABELS[COLUMNS[activeCol]]}</span>
+          <span className="ak-col-heads-mobile__count">{grouped[COLUMNS[activeCol]].length}</span>
+        </div>
 
         <div
           className="ak-strip ak-board"

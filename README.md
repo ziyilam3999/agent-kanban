@@ -11,11 +11,25 @@ The **source of truth already exists locally** and this project never duplicates
 |---|---|---|
 | `~/.claude/tasks/<session>/<id>.json` | every ticket (id, subject, description, status, blockedBy) | the cards |
 | `~/.claude/3role-ledger/<session>/<id>.jsonl` | per-ticket role audit (planner / plan-review / executor / execution-review, with timestamps + artifacts) | the per-card agent comments |
+| `~/.claude/3role-ledger/<session>/<id>.jsonl` **with no matching `<id>.json` anywhere** | the SAME per-ticket role audit, but no card | a **ledger-only lane** — rendered only while live, marked "no ticket", vanishes when done/dead |
 
 A local **exporter** (`scripts/export-board.ts`) joins the two, **redacts home paths / secrets**,
 derives the columns, and writes a single `board.json` **snapshot** (gitignored — it contains internal
 task content). The web view renders that snapshot. The snapshot is carried to the web **out of band**
 (blob upload), never through git — so this public repo holds **code only**.
+
+### Ledger-only lanes — a running lane with **no ticket**
+
+A `<id>.jsonl` ledger file with **no matching `<id>.json` card anywhere** still renders as a lane
+**while it is genuinely live** — the board's own liveness rule (an open punch-in within the 6h
+in-flight cap, or any row within the 8-minute handoff-gap window), the exact same test every
+card-backed lane passes. This happens whenever a chain role, a research seat, or a ship-tail run is
+spawned by id without a corresponding `TaskCreate` — a real, honestly-surfaced gap in ticket
+discipline, not something to paper over. Its `subject` carries a visible **"no ticket"** marker so
+the gap is obvious on the card face, its `updatedAt` is the ledger **file's own mtime** (never a
+minted timestamp), and it **disappears again** the moment the work finishes or dies — never a
+lingering pseudo-card. It counts toward "N LANES LIVE" like any other lane, but is excluded from the
+orphan-backlog migrate nudge (there is no card to migrate) and never affects the session picker.
 
 ### Columns (derived, no new bookkeeping)
 
@@ -42,6 +56,7 @@ home path or a board snapshot is ever committed.
 | Command | Purpose |
 |---|---|
 | `npm run export:board` | regenerate `board.json` from local `~/.claude` state |
+| `npx tsx scripts/lanes-live.ts <board.json>` | oracle CLI — prints `{sessionId, sessionLive, activeIds, lanes}` for a snapshot, computed by IMPORTING the same `computeActiveIds`/`deriveLanes` the web view runs (no browser needed) |
 | `npm run kanban:upload` | upload `data/board.json` to Vercel Blob (token from Keychain) |
 | `npm run kanban:sync` | export **and** upload (the full courier) |
 | `npm run dev` / `build` / `start` | the Next.js board view |

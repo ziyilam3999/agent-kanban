@@ -155,9 +155,17 @@ export function chainInFlight(t: Ticket): boolean {
     return pipelineHasOpenPunchIn(t);
   }
   // No pipeline-role comment at all — the only remaining in-flight signal is an
-  // OPEN research comment (#1516). Absent any comments (chain-less ticket, the
-  // pre-#1516 baseline), this correctly falls through to `false`.
-  return t.comments.some((c) => c.role === "research" && !c.closedAt);
+  // OPEN research OR ship-tail comment (#1516; ship-tail parity added by
+  // kanban-live-lanes-visibility leg 2, 2026-09-18 — mirrors research exactly:
+  // `ship-tail` was already excluded from PIPELINE_ROLE_SET by design, #1901,
+  // but had NO in-flight branch at all, so a ship-tail-only ledger fell dark
+  // 8 minutes into a 10-20 minute run via the ACTIVE_WINDOW_MS fallback in
+  // computeActiveIds instead of staying in-flight under the cap like research
+  // does). Absent any comments (chain-less ticket, the pre-#1516 baseline),
+  // this correctly falls through to `false`.
+  return t.comments.some(
+    (c) => (c.role === "research" || c.role === "ship-tail") && !c.closedAt
+  );
 }
 
 /**
@@ -397,10 +405,12 @@ export function openPunchInClock(t: Ticket): number | undefined {
     return opc;
   }
 
-  // RESEARCH branch — open research rows only (chainInFlight's fallback).
+  // RESEARCH/SHIP-TAIL branch — open research OR ship-tail rows only
+  // (chainInFlight's fallback; ship-tail parity, kanban-live-lanes-visibility
+  // leg 2 — same reasoning as the chainInFlight edit above).
   let opc: number | undefined;
   for (const c of t.comments) {
-    if (c.role !== "research" || c.closedAt) continue;
+    if ((c.role !== "research" && c.role !== "ship-tail") || c.closedAt) continue;
     const ms = parseTs(c.ts);
     if (ms !== undefined && (opc === undefined || ms > opc)) opc = ms;
   }

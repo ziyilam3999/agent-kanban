@@ -15,13 +15,14 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
   buildBoard,
+  buildLedgerOnlyTicket,
   buildSessionSummary,
   buildTicket,
   detectOrphanBacklog,
   type RawLedgerLine,
   type RawTask,
 } from "../lib/build-board";
-import { COLUMNS, type SessionSummary } from "../lib/board-schema";
+import { COLUMNS, type SessionSummary, type Ticket } from "../lib/board-schema";
 
 const HOME = os.homedir();
 const TASKS_DIR = process.env.TASKS_DIR || path.join(HOME, ".claude", "tasks");
@@ -246,6 +247,27 @@ function readLedger(sessionId: string, taskId: string): RawLedgerLine[] {
   return lines;
 }
 
+/**
+ * kanban-live-lanes-visibility — every card id across ALL valid sessions
+ * (plan-review non-blocking note 3: `sessions` already comes from
+ * `collectSessions`, which excludes scratch session names via
+ * `isExcludedName` AND excludes the `EXPECTED.json` fixture companion file
+ * via `jsonTaskFiles`'s filter — so deriving the global-absence set from
+ * `sessions[].taskFiles`, rather than a fresh independent fs walk, inherits
+ * both exclusions for free and a fixture card can never suppress a ledger-
+ * only lane). A ledger id present in this set is NOT eligible for a
+ * ledger-only lane — a real card exists for it somewhere.
+ */
+function allCardIds(sessions: SessionInfo[]): Set<string> {
+  const ids = new Set<string>();
+  for (const s of sessions) {
+    for (const f of s.taskFiles) {
+      ids.add(path.basename(f, ".json"));
+    }
+  }
+  return ids;
+}
+
 function main(): void {
   const now = Date.now();
   const sessions = collectSessions();
@@ -271,34 +293,66 @@ function main(): void {
 
   // Build tickets for EVERY non-excluded session, each tagged with its own
   // 8-char sessionId (matches SessionSummary.id) so the view can filter per-session.
-  const tickets = sessions
-    .flatMap((s) => {
-      const sid = s.sessionId.slice(0, 8);
-      return s.taskFiles
-        .map((file) => {
-          const parsed = readTask(file);
-          if (!parsed) return null;
-          const ledger = readLedger(s.sessionId, parsed.task.id);
-          // board-inprogress-recency — thread the SAME `now` already captured
-          // above (no second Date.now() — N2) so buildTicket's pending→
-          // in_progress promotion is gated on recency instead of "ever
-          // touched" (#1980's INFLIGHT_LANE_CAP_MS window). This is the ONLY
-          // call site that opts in; every other buildTicket caller (tests,
-          // the ac0-1980 audit script) omits nowMs and keeps the old
-          // ever-touched behavior (fail-safe, Round-1 resolution 1a).
-          return buildTicket(
-            parsed.task,
-            ledger,
-            parsed.mtimeMs,
-            sid,
-            s.ledgerMtimes.get(parsed.task.id),
-            now
-          );
-        })
-        .filter((t): t is NonNullable<typeof t> => t !== null);
-    })
-    // newest-updated first within a column-agnostic list
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+  const cardTickets: Ticket[] = sessions.flatMap((s) => {
+    const sid = s.sessionId.slice(0, 8);
+    return s.taskFiles
+      .map((file) => {
+        const parsed = readTask(file);
+        if (!parsed) return null;
+        const ledger = readLedger(s.sessionId, parsed.task.id);
+        // board-inprogress-recency — thread the SAME `now` already captured
+        // above (no second Date.now() — N2) so buildTicket's pending→
+        // in_progress promotion is gated on recency instead of "ever
+        // touched" (#1980's INFLIGHT_LANE_CAP_MS window). This is the ONLY
+        // call site that opts in; every other buildTicket caller (tests,
+        // the ac0-1980 audit script) omits nowMs and keeps the old
+        // ever-touched behavior (fail-safe, Round-1 resolution 1a).
+        return buildTicket(
+          parsed.task,
+          ledger,
+          parsed.mtimeMs,
+          sid,
+          s.ledgerMtimes.get(parsed.task.id),
+          now
+        );
+      })
+      .filter((t): t is NonNullable<typeof t> => t !== null);
+  });
+
+  // kanban-live-lanes-visibility — a 3-role ledger file with NO card anywhere
+  // (global absence, via `allCardIds`) still renders as a lane while it is
+  // genuinely live (the ledger-only lane contract). One candidate per
+  // (session, ledger id) pair whose id is globally card-less;
+  // `buildLedgerOnlyTicket` applies the SAME board liveness rule the view
+  // uses and returns `null` for a finished/dead one — so a stale ledger file
+  // never becomes a lingering pseudo-card.
+  // Test-only kill-switch (Rule-16 override convention — never a shipped
+  // semantic switch, undocumented in this file's env-table header on
+  // purpose): lets the jest suite pin the pre-fix "no card -> no ticket"
+  // fact as a permanent in-repo regression guard (AC-0b's self-mutation
+  // leg), alongside the executor's manual origin/master RED quote in the PR
+  // body. A real deployment never sets this.
+  const ledgerOnlyLegOn = process.env.LEDGER_ONLY_LANES_OFF !== "1";
+  const cardIds = allCardIds(sessions);
+  const ledgerOnlyTickets: Ticket[] = ledgerOnlyLegOn
+    ? sessions.flatMap((s) => {
+        const sid = s.sessionId.slice(0, 8);
+        const out: Ticket[] = [];
+        for (const [taskId, ledgerMtimeMs] of s.ledgerMtimes) {
+          if (cardIds.has(taskId)) continue; // a card exists somewhere — not eligible
+          const lines = readLedger(s.sessionId, taskId);
+          if (lines.length === 0) continue; // guard — ledgerMtimes only lists real files
+          const ticket = buildLedgerOnlyTicket(taskId, lines, ledgerMtimeMs, sid, now);
+          if (ticket) out.push(ticket);
+        }
+        return out;
+      })
+    : [];
+
+  // newest-updated first within a column-agnostic list
+  const tickets = [...cardTickets, ...ledgerOnlyTickets].sort(
+    (a, b) => b.updatedAt - a.updatedAt
+  );
 
   const board = buildBoard({
     generatedAt: now,

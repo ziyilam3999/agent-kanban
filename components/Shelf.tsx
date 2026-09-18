@@ -82,7 +82,7 @@ export function Shelf({ tickets, now, onSelect }: ShelfProps) {
   const summary = SHELF_KINDS.map(({ kind, label }) => `${label} ${counts[kind]}`).join(" · ");
 
   return (
-    <details className="ak-shelf" open={open} onToggle={onToggle}>
+    <details className="ak-shelf" open={open} onToggle={onToggle} data-ak-chrome="bottom">
       <summary className="ak-shelf__summary">{summary}</summary>
       <div className="ak-shelf__body">
         {SHELF_KINDS.map(({ kind, label }) => {

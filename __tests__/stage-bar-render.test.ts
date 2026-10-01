@@ -156,3 +156,29 @@ describe("#1468 stage-bar render — the operator-caught bug, at the render surf
     }
   });
 });
+
+describe("#2783 NEEDS-WORK renders the rework states, not done", () => {
+  it("AC-5: an exec-review NEEDS-WORK verdict marks EXECUTOR reworking and EXEC-REVIEW failed", () => {
+    const t = ticket([
+      { role: "planner", ts: at(1) },
+      { role: "executor", ts: at(2) },
+      { role: "execution-review", ts: at(3), verdict: "NEEDS-WORK" },
+    ]);
+    const markup = render(t);
+    const [planner, planReview, executor, execReview] = stepSegments(markup);
+
+    // The rework look lands on EXECUTOR (glow + the reworking class), exactly
+    // as a FAIL bounce does — NEEDS-WORK is the same go-fix-it instruction.
+    expect(executor).toMatch(/ak-pipeline__step--reworking/);
+    expect(executor).toMatch(/ak-pipeline__step--glow/);
+    expect(executor).toContain("EXECUTOR");
+
+    // The review pill reads FAILED, never done/pass.
+    expect(execReview).toMatch(/ak-pipeline__step--failed/);
+    expect(execReview).not.toMatch(/ak-pipeline__step--(?:done|pass)\b/);
+
+    // Nothing else glows: planner and plan-review stay settled.
+    expect(planner).not.toMatch(/ak-pipeline__step--glow/);
+    expect(planReview).not.toMatch(/ak-pipeline__step--glow/);
+  });
+});

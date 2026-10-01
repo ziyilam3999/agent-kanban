@@ -120,9 +120,13 @@ const REVIEW_ROLES = new Set(["plan-review", "execution-review"]);
 /** Only scan the first 64KB of a review artifact — never slurp a huge file. */
 const ARTIFACT_READ_CAP_BYTES = 64 * 1024;
 
-/** Recognised verdict tokens written as a `Decision: <token>` line in an artifact. */
+/** Recognised verdict tokens written as a `Decision: <token>` line in an artifact.
+ *  #2783 - adds the NEEDS-WORK spellings so an artifact-only NEEDS-WORK review
+ *  resolves fail-class (fix cycle) instead of pending; PASS/APPROVE/
+ *  SHIP-WITH-FIXES stay on purpose (this regex also carries the affirmative
+ *  vocabulary, unlike FAIL_CLASS_RE). */
 const DECISION_RE =
-  /Decision:\s*(PASS|FAIL|REVISE|APPROVE|BLOCK|SHIP-WITH-FIXES)/i;
+  /Decision:\s*(PASS|FAIL|REVISE|APPROVE|BLOCK|NEEDS-WORK|NEEDS_WORK|SHIP-WITH-FIXES)/i;
 
 /**
  * PURE: extract the first `Decision: <token>` verdict from arbitrary text.
@@ -205,7 +209,8 @@ export function basenameOf(p: string): string {
  *   "none"             — no execution-review line at all
  *   "pending"          — newest execution-review has no resolvable verdict
  *   "resolved-nonfail" — newest execution-review resolved to a NON-fail verdict
- *   "resolved-fail"    — newest execution-review resolved to FAIL/BLOCK/REJECT
+ *   "resolved-fail"    — newest execution-review resolved to a fail-class verdict
+ *                        (FAIL/BLOCK/REJECT; #2783 adds NEEDS-WORK/NEEDS_WORK/REVISE)
  */
 export type ExecReviewState = "none" | "pending" | "resolved-nonfail" | "resolved-fail";
 

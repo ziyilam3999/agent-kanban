@@ -76,8 +76,17 @@ export function roleLabel(role: string): string {
  * drift between layers. A FAIL/BLOCK/REJECT execution-review sends the card
  * back to IN PROGRESS (rework is an honest backward move) and keeps the chain
  * in flight; every other resolved verdict counts as non-fail.
+ *
+ * #2783 - a review can also say NEEDS-WORK (NEEDS_WORK) or REVISE instead of
+ * FAIL; those are the same go-fix-it instruction, so they are fail-class too:
+ * the card bounces to the rework states until a LATER PASS of the SAME review
+ * role supersedes it (newest-row-of-the-role-wins, unchanged). The new tokens
+ * are whole-word (\b) so a decorated PASS like UNREVISED PASS or
+ * NEEDS-WORKAROUND never fires; BLOCK/FAIL/REJECT keep their exact pre-#2783
+ * substring matching (widening THOSE is #2927, deliberately not here).
  */
-export const FAIL_CLASS_RE = /BLOCK|FAIL|REJECT/i;
+export const FAIL_CLASS_RE =
+  /BLOCK|FAIL|REJECT|\b(?:NEEDS[-_]WORK|REVISE)\b/i;
 
 /** TRUE iff the verdict carries a fail-class token (case-insensitive). */
 export function isFailClassVerdict(v: string): boolean {

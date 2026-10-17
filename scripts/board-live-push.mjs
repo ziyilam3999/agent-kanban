@@ -6,6 +6,7 @@
 //   --ledger-dir <dir>   3-role ledger root (default ~/.claude/3role-ledger); status-tables reads it too
 //   --events-dir <dir>   step-log events root (default: the ledger dir; the old rules do not read events yet)
 //   --tasks-dir <dir>    task-store root (default ~/.claude/tasks); status-tables reads it too
+//   --kanban-json <file> frozen kanban selector state ({active, lanes}) fed to the parity block instead of spawning the selectors
 //   --now <iso>          pin the clock (generatedAt, recency windows, status-tables --now)
 //   --dry-run [--json]   build the summary, print it as one JSON object, touch no network, no state file
 //   BOARD_AI_BRAIN       ai-brain checkout (default ~/coding_projects/ai-brain)
@@ -19,7 +20,7 @@ import { execFileSync } from 'node:child_process';
 // PROGRESS_FOCUS_PROGRESS, which status-tables honours.
 const ARGV = process.argv.slice(2);
 const flagVal = (name) => { const i = ARGV.indexOf(name); return i >= 0 && ARGV[i + 1] && !ARGV[i + 1].startsWith('--') ? ARGV[i + 1] : null; };
-const VALUE_FLAGS = ['--focus-dir', '--board', '--session', '--ledger-dir', '--events-dir', '--tasks-dir', '--now'];
+const VALUE_FLAGS = ['--focus-dir', '--board', '--session', '--ledger-dir', '--events-dir', '--tasks-dir', '--now', '--kanban-json'];
 const DRY = ARGV.includes('--dry-run');
 const HOME = os.homedir();
 const LEDGER_DIR = path.resolve(flagVal('--ledger-dir') || path.join(HOME, '.claude/3role-ledger'));
@@ -166,7 +167,9 @@ const lanes = tickets.filter((t) => t.column === 'in_progress' || t.column === '
 // Kanban parity (operator 2026-10-09): lanes, liveness and current stage come from the kanban's OWN
 // selectors (lib/active computeActiveIds + lib/lanes deriveLanes), so the two boards never disagree.
 let kb = null;
-try { kb = JSON.parse(execFileSync(path.join(os.homedir(), 'coding_projects/agent-kanban/node_modules/.bin/tsx'), [path.join(path.dirname(new URL(import.meta.url).pathname), 'kanban-lanes.ts')], { encoding: 'utf8', timeout: 60000, stdio: ['ignore', 'pipe', 'ignore'] })); } catch { kb = null; }
+const KANBAN_JSON = flagVal('--kanban-json');
+if (KANBAN_JSON) { try { kb = JSON.parse(fs.readFileSync(path.resolve(KANBAN_JSON), 'utf8')); } catch (e) { console.error('bad --kanban-json: ' + e.message); process.exit(2); } }
+else try { kb = JSON.parse(execFileSync(path.join(os.homedir(), 'coding_projects/agent-kanban/node_modules/.bin/tsx'), [path.join(path.dirname(new URL(import.meta.url).pathname), 'kanban-lanes.ts')], { encoding: 'utf8', timeout: 60000, stdio: ['ignore', 'pipe', 'ignore'] })); } catch { kb = null; }
 const PIPE = ['planner', 'plan-review', 'executor', 'execution-review'];
 if (kb) {
   const byId = new Map(kb.lanes.map((x) => [String(x.id), x]));

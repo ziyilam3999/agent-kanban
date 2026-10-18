@@ -385,9 +385,16 @@ const STATE = path.join(os.homedir(), '.claude/board-live/state.json');
 const hash = (await import('node:crypto')).createHash('sha256').update([summary, focusBody, detailBody, JSON.stringify({ generatedAt: snap.generatedAt, details: shelfDetails })].join('\n').split(snap.generatedAt).join('')).digest('hex'); // #3272: the change-skip hash covers the #4 body too
 let prev = {}; try { prev = JSON.parse(fs.readFileSync(STATE, 'utf8')); } catch {}
 if (!process.argv.includes('--force') && prev.hash === hash && Date.now() - (prev.at || 0) < 10 * 60 * 1000) { console.log('skip: unchanged since ' + new Date(prev.at).toISOString()); process.exit(0); }
-upsertIssue('board-live summary (auto)', summary);
-upsertIssue('board-live focus details (auto)', focusBody);
-upsertIssue('board-live details (auto)', detailBody);
-upsertIssue('board-live shelf details (auto)', JSON.stringify({ generatedAt: snap.generatedAt, details: shelfDetails }));
+// #3272 F3: size-check EVERY body before the first upsert — an over-cap body aborts the whole push
+// (all-or-nothing: no issue is left fresh while another stays stale) — and #4 goes before #1, so a
+// #4 failure can never leave a fresh #1 beside a stale #4 (the page joins the ticket lists from #4).
+const BODIES = [
+  ['board-live focus details (auto)', focusBody],
+  ['board-live summary (auto)', summary],
+  ['board-live details (auto)', detailBody],
+  ['board-live shelf details (auto)', JSON.stringify({ generatedAt: snap.generatedAt, details: shelfDetails })],
+];
+for (const [bt, bb] of BODIES) if (bb.length > 60000) throw new Error(`${bt} too large: ${bb.length}`);
+for (const [bt, bb] of BODIES) upsertIssue(bt, bb);
 fs.writeFileSync(STATE, JSON.stringify({ hash, at: Date.now() }));
 console.log('pushed at ' + snap.generatedAt);

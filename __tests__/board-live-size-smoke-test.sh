@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # #3272 size smoke (local, like the parity smoke — CI runs jest only): the board-live summary stays
 # under the issue-body size cap WITH HEADROOM once the per-ticket focus lists move to their own pinned
-# issue #4, and the merged size-weighted % rides the cards untouched. RED control built in: master's
-# script on the same fixture must EXCEED 62000 — the live crash reproduced by code (SMOKE exits
+# issue #4, and the merged size-weighted % rides the cards untouched. RED control built in: the pinned
+# PRE-FIX blob (398cbca) on the same fixture must EXCEED 62000 — the live crash reproduced by code (SMOKE exits
 # non-zero on master: every GREEN arm below fails there). Also proves the deploy join: the selector
 # the feed spawns is the tracked scripts/kanban-lanes.ts of this checkout, and without --kanban-json
 # the feed reports laneSource == 'kanban'.
@@ -27,7 +27,7 @@ WORK="$(mktemp -d)"
 CREATED_BOARD=0
 cleanup() {
   [ "$CREATED_BOARD" = 1 ] && rm -f "$KAN/data/board.json"
-  rm -rf "$WORK"
+  rm -rf "$WORK" "${BIG:-}"
 }
 trap cleanup EXIT
 mkdir -p "$WORK/ledger" "$WORK/tasks"
@@ -42,15 +42,44 @@ run() { # run the feed on FX; extra args appended (always --dry-run: no network,
     --now "$NOW" --focus-dir "$FOCUS_DIR" --dry-run --json "$@"
 }
 
-# --- RED control: master's script on the same fixture exceeds 62000 (the crash, by code)
-MS="$WORK/master-feed.mjs"
-git -C "$KAN" show master:scripts/board-live-push.mjs > "$MS" 2>/dev/null || fail "cannot read master:scripts/board-live-push.mjs"
+# --- RED control: the PRE-FIX script on the same fixture exceeds 62000 (the crash, by code).
+# #3272 F2: pinned to the pre-fix BLOB 398cbca, never the moving master ref — once the fix merges,
+# master IS the fixed script (45.5K on FX) and a master-reading control goes permanently red.
+MS="$WORK/prefix-feed.mjs"
+git -C "$KAN" show 398cbca:scripts/board-live-push.mjs > "$MS" 2>/dev/null || fail "cannot read the pinned pre-fix blob 398cbca:scripts/board-live-push.mjs"
 node "$MS" --board "$FX/board.json" --kanban-json "$FX/kanban.json" --session "$SID" \
   --ledger-dir "$WORK/ledger" --events-dir "$WORK/ledger" --tasks-dir "$WORK/tasks" \
   --now "$NOW" --focus-dir "$FOCUS_DIR" --dry-run --json > "$WORK/red.json" 2>/dev/null \
-  || fail "master dry-run exited nonzero"
+  || fail "pre-fix blob dry-run exited nonzero"
 RED_N="$(wc -c < "$WORK/red.json" | tr -d ' ')"
-[ "$RED_N" -gt 62000 ] || fail "RED control: master's summary on FX is only $RED_N bytes (must exceed 62000 — recalibrate the fixture)"
+[ "$RED_N" -gt 62000 ] || fail "RED control: the pre-fix blob's summary on FX is only $RED_N bytes (must exceed 62000 — recalibrate the fixture)"
+
+# --- #3272 F3: an over-cap #4 body aborts the WHOLE push before any upsert (all-or-nothing), and #4
+# is checked and pushed before #1, so a #4 failure can never leave a fresh #1 beside a stale #4.
+# gh is deliberately ABSENT from PATH: if any upsert were reached, the run would die on missing gh
+# instead of the size guard — the arm asserts the abort IS the pre-push size check naming #4 first.
+BIG="$(mktemp -d)"
+cp -R "$FOCUS_DIR/." "$BIG/"
+node - "$BIG" <<'NODE' || fail "F3: over-cap focus stub build failed"
+const fs = require('fs'); const d = process.argv[2];
+const cfg = JSON.parse(fs.readFileSync(d + '/focus-lists.json', 'utf8'));
+cfg.tasks_dir = d + '/tasks'; // the copied stub points at the ORIGINAL mktemp tasks dir — repoint it here
+cfg.focus[Object.keys(cfg.focus)[0]].push('9999');
+fs.writeFileSync(d + '/focus-lists.json', JSON.stringify(cfg, null, 1) + '\n');
+// one synthesized ticket whose waits list alone pushes the #4 body past the 60000 cap (subjects are
+// capped at 140 chars by the feed, but waits ride focusTickets unsliced)
+const t = { id: '9999', subject: 'fixture over-cap arm (synthesized)', status: 'pending', blockedBy: Array.from({ length: 6000 }, (_, i) => String(800000 + i)) };
+fs.writeFileSync(d + '/tasks/9999.json', JSON.stringify(t, null, 1) + '\n');
+NODE
+mkdir -p "$BIG/bin"; ln -sf "$(command -v node)" "$BIG/bin/node"
+env PATH="$BIG/bin" "$BIG/bin/node" "$SCRIPT" --board "$FX/board.json" --kanban-json "$FX/kanban.json" \
+  --session "$SID" --ledger-dir "$WORK/ledger" --events-dir "$WORK/ledger" --tasks-dir "$WORK/tasks" \
+  --now "$NOW" --focus-dir "$BIG" > "$WORK/bigcap.out" 2> "$WORK/bigcap.err"; rc_big=$?
+[ "$rc_big" != 0 ] || fail "F3: an over-cap #4 body did not abort the push (rc=0)"
+if ! command grep -q "board-live focus details (auto) too large" "$WORK/bigcap.err"; then
+  head -1 "$WORK/bigcap.err" >&2
+  fail "F3: the abort is not the pre-push size guard naming #4 first (rc=$rc_big)"
+fi
 
 # --- deploy join (A2): the tracked selector answers, both directly and through the feed's own spawn
 node - "$SCRIPT" <<'NODE' || fail "A2: the selector the feed spawns is not the tracked one"
@@ -126,5 +155,5 @@ for (const f of stub) {
 }
 chk('body carries generatedAt', typeof body.generatedAt === 'string' && body.generatedAt);
 if (bad.length) { console.error('FAIL: ' + bad.join('; ')); process.exit(1); }
-console.log('size smoke: summary ' + JSON.stringify(green).length + ' bytes (cap 48000); master on the same fixture ' + redN + ' bytes (>62000); ticket lists ride the #4 body; wtd fields integer on every card; tracked selector answers');
+console.log('size smoke: summary ' + JSON.stringify(green).length + ' bytes (cap 48000); the pre-fix blob on the same fixture ' + redN + ' bytes (>62000); ticket lists ride the #4 body; wtd fields integer on every card; tracked selector answers');
 NODE

@@ -5,7 +5,9 @@
 # PRE-FIX blob (398cbca) on the same fixture must EXCEED 62000 — the live crash reproduced by code (SMOKE exits
 # non-zero on master: every GREEN arm below fails there). Also proves the deploy join: the selector
 # the feed spawns is the tracked scripts/kanban-lanes.ts of this checkout, and without --kanban-json
-# the feed reports laneSource == 'kanban'.
+# the feed reports laneSource == 'kanban'. #3278 adds the details arm: the #2 body (per-ticket
+# description + timeline) <= 50000 with headroom, its own pinned RED control (blob 0555ad2) and a
+# doubled-board growth bound.
 # Needs BOARD_AI_BRAIN -> an ai-brain checkout carrying tests/fixtures/board-size (the FX fixture)
 # and tools/board/fixtures (the focus stub generator). All fixture rows are synthesized (fake 99xx/90xx
 # ids, made-up subjects); nothing is copied from real tickets, ledger rows or receipts.
@@ -157,3 +159,98 @@ chk('body carries generatedAt', typeof body.generatedAt === 'string' && body.gen
 if (bad.length) { console.error('FAIL: ' + bad.join('; ')); process.exit(1); }
 console.log('size smoke: summary ' + JSON.stringify(green).length + ' bytes (cap 48000); the pre-fix blob on the same fixture ' + redN + ' bytes (>62000); ticket lists ride the #4 body; wtd fields integer on every card; tracked selector answers');
 NODE
+
+# --- #3278 details arm: the #2 body (per-ticket description + step timeline) under the cap WITH
+# HEADROOM — target <= 50000 on today's shape (hard cap 60000), by construction: per-entry trim
+# (description + most-recent timeline rows) and a per-section row cap (recent lanes + the N
+# most-recently-updated active tickets), so a bigger board cannot grow the body. Fixture is fully
+# synthesized at today's shape (fake 96xx ids, made-up text; descriptions at today's 420-char cap,
+# 12-row ledger timelines) — nothing copied from real tickets, ledger rows or receipts. Every feed
+# invocation below is a no-network print except the RED control, which crosses the pre-push size
+# guard with gh deliberately ABSENT from PATH (nothing can reach the network even if the guard
+# were bypassed) and must abort ON the size check naming the details body.
+DX="$WORK/dx"
+node - "$DX" 1 <<'NODE' || fail "details fixture build failed"
+const fs = require('fs'); const path = require('path'); const outDir = process.argv[2];
+fs.mkdirSync(path.join(outDir, 'ledger', 'fx-dx'), { recursive: true }); fs.mkdirSync(path.join(outDir, 'tasks'), { recursive: true });
+const WORDS = 'keep the ticket detail sheet small with headroom under the issue body cap so the whole live push cannot be refused by one over cap parcel'.split(' ');
+const desc = (n) => { let s = `fixture detail description ${n} for the size cap calibration`; let i = n % WORDS.length; while (s.length < 420) s += ' ' + WORDS[i++ % WORDS.length]; return s.slice(0, 420); };
+const stamp = (n, k) => new Date(Date.parse('2026-10-18T12:00:00Z') - (n % 40) * 3600000 - (11 - k) * 300000).toISOString();
+const ROLES = ['research', 'planner', 'plan-review', 'executor', 'execution-review', 'ship-tail'];
+const rows = [];
+for (let i = 0; i < 40; i++) {
+  const id = 9601 + i;
+  rows.push({ id: String(id), title: `fixture detail row ${id} hold the board detail sheet under the issue size cap`, column: 'in_progress', kind: 'work', blockedBy: [], updatedAt: stamp(i, 0), description: desc(id) });
+  const lines = [];
+  for (let k = 0; k < 12; k++) {
+    const role = ROLES[k % ROLES.length];
+    lines.push(JSON.stringify({ role, session_id: 'fx-dx', ts: stamp(i, k), closedAt: stamp(i, k), modelVersion: k % 2 ? 'claude-sonnet-5' : 'claude-opus-5', provider: 'claude', effort: 'high', verdict: /review/.test(role) ? 'PASS' : '', artifact_path: `plans/2026-10-1${k}-3${id}-plan.md` }));
+  }
+  fs.writeFileSync(path.join(outDir, 'ledger', 'fx-dx', id + '.jsonl'), lines.join('\n') + '\n');
+}
+fs.writeFileSync(path.join(outDir, 'board.json'), JSON.stringify({ generatedAt: '2026-10-18T12:00:00Z', note: '#3278 details-arm fixture — synthesized, never copied from the live store', rows }, null, 1) + '\n');
+fs.writeFileSync(path.join(outDir, 'kanban.json'), JSON.stringify({ captured_from: { source: 'synthesized for the #3278 details arm' }, active: ['9601', '9602', '9603', '9604'], lanes: [0, 1, 2, 3].map((i) => ({ id: String(9601 + i), stage: i % 4, reworking: false, failedStage: null })) }, null, 1) + '\n');
+NODE
+DXGROW="$WORK/dx-grow" # growth arm: the SAME fixture with the active rows doubled (40 -> 80)
+node - "$DX" "$DXGROW" <<'NODE' || fail "doubled details fixture build failed"
+const fs = require('fs'); const path = require('path'); const [src, outDir] = process.argv.slice(2);
+fs.mkdirSync(path.join(outDir, 'ledger', 'fx-dx'), { recursive: true }); fs.mkdirSync(path.join(outDir, 'tasks'), { recursive: true });
+const board = JSON.parse(fs.readFileSync(path.join(src, 'board.json'), 'utf8'));
+const rows = board.rows.map((r) => ({ ...r, id: String(Number(r.id) + 40), title: r.title.replace(/row \d+/, 'row ' + (Number(r.id) + 40)), description: r.description.replace(/description \d+/, 'description ' + (Number(r.id) + 40)) }));
+fs.writeFileSync(path.join(outDir, 'board.json'), JSON.stringify({ ...board, rows: board.rows.concat(rows) }, null, 1) + '\n');
+fs.writeFileSync(path.join(outDir, 'kanban.json'), fs.readFileSync(path.join(src, 'kanban.json'), 'utf8'));
+for (let i = 0; i < 80; i++) { const from = path.join(src, 'ledger', 'fx-dx', (9601 + (i % 40)) + '.jsonl'); const to = path.join(outDir, 'ledger', 'fx-dx', (9601 + i) + '.jsonl'); fs.writeFileSync(to, fs.readFileSync(from, 'utf8')); }
+NODE
+
+# RED control (#3272 F2 rule): pinned to the PRE-FIX blob 0555ad2, never the moving master. The old
+# feed on the same fixture must abort the WHOLE push on the pre-push size guard naming the #2 body,
+# with the guard's own message carrying a byte count > 60000 — today's live refusal, by code.
+MS2="$WORK/prefix-feed-3278.mjs"
+git -C "$KAN" show 0555ad2:scripts/board-live-push.mjs > "$MS2" 2>/dev/null || fail "cannot read the pinned pre-fix blob 0555ad2:scripts/board-live-push.mjs"
+DXBIN="$WORK/dx-bin"; mkdir -p "$DXBIN"; ln -sf "$(command -v node)" "$DXBIN/node" # gh absent: only node resolves
+env PATH="$DXBIN" "$DXBIN/node" "$MS2" --board "$DX/board.json" --kanban-json "$DX/kanban.json" \
+  --session fx-dx --ledger-dir "$DX/ledger" --events-dir "$DX/ledger" --tasks-dir "$DX/tasks" \
+  --now "$NOW" --focus-dir "$FOCUS_DIR" > "$WORK/dxred.out" 2> "$WORK/dxred.err"; rc_dxred=$?
+[ "$rc_dxred" != 0 ] || fail "#3278 RED: the pre-fix blob did not abort on the fixture (rc=0)"
+if ! command grep -q "board-live details (auto) too large" "$WORK/dxred.err"; then
+  head -1 "$WORK/dxred.err" >&2
+  fail "#3278 RED: the abort is not the pre-push size guard naming the #2 body (rc=$rc_dxred)"
+fi
+RED_DXLARGE="$(command grep -o 'board-live details (auto) too large: [0-9]*' "$WORK/dxred.err" | tail -1 | command grep -o '[0-9]*$')"
+[ -n "$RED_DXLARGE" ] && [ "$RED_DXLARGE" -gt 60000 ] || fail "#3278 RED: the guard's byte count is $RED_DXLARGE (must exceed 60000 — recalibrate the fixture)"
+
+# GREEN + growth bound + field coverage: the fixed feed prints the #2 body through --details-body
+# (no network, no state write — the same print-and-exit pattern as --focus-body) on the today-shaped
+# fixture and on the doubled one; both must measure <= 50000 (headroom under the 60000 cap).
+dxrun() { # $1 = fixture dir; prints the #2 body on stdout
+  node "$SCRIPT" --board "$1/board.json" --kanban-json "$1/kanban.json" --session fx-dx \
+    --ledger-dir "$1/ledger" --events-dir "$1/ledger" --tasks-dir "$1/tasks" \
+    --now "$NOW" --focus-dir "$FOCUS_DIR" --details-body
+}
+dxrun "$DX" > "$WORK/dxgreen.json" 2>"$WORK/dxgreen.err" || fail "#3278 GREEN: --details-body exited nonzero: $(head -1 "$WORK/dxgreen.err")"
+dxrun "$DXGROW" > "$WORK/dxgrow.json" 2>"$WORK/dxgrow.err" || fail "#3278 growth: --details-body exited nonzero: $(head -1 "$WORK/dxgrow.err")"
+DXG_N="$(wc -c < "$WORK/dxgreen.json" | tr -d ' ')"
+DXR_N="$(wc -c < "$WORK/dxgrow.json" | tr -d ' ')"
+[ "$DXG_N" -le 50000 ] || fail "#3278 GREEN: the #2 body is $DXG_N bytes (must be <= 50000)"
+[ "$DXR_N" -le 50000 ] || fail "#3278 growth: the doubled-board #2 body is $DXR_N bytes (must be <= 50000 — the row cap is not bounding)"
+node - "$WORK/dxgreen.json" <<'NODE' || exit 1
+const fs = require('fs');
+const body = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const bad = [];
+const chk = (name, ok) => { if (!ok) bad.push(name); };
+// the body's top-level keys are exactly the loader's read set (details); unread generatedAt is gone
+chk('top-level keys == [details]', JSON.stringify(Object.keys(body)) === '["details"]');
+const ids = Object.keys(body.details);
+// per-section row cap: 40 active rows exist, so the oldest non-lane ids must fall outside the cap
+chk('row cap: oldest non-lane active ids absent', ['9638', '9639', '9640'].every((x) => !(x in body.details)));
+for (const [id, e] of Object.entries(body.details)) {
+  chk('#' + id + ' d is a string', typeof e.d === 'string');
+  if (typeof e.tl !== 'string') { bad.push('#' + id + ' tl is not a string'); continue; }
+  let steps; try { steps = JSON.parse(e.tl); } catch { bad.push('#' + id + ' tl does not parse as JSON'); continue; }
+  chk('#' + id + ' tl is an array', Array.isArray(steps));
+  // the page's openSheet renders r/t/c/v/m/e/a per step — every step keeps all seven
+  for (const s of (Array.isArray(steps) ? steps : [])) for (const k of ['r', 't', 'c', 'v', 'm', 'e', 'a']) chk('#' + id + ' step keeps ' + k, k in s);
+}
+if (bad.length) { console.error('FAIL: ' + bad.join('; ')); process.exit(1); }
+NODE
+echo "size smoke: details body $DXG_N bytes on today's shape, $DXR_N on the doubled board (target <= 50000, cap 60000); pre-fix blob refused the whole push at $RED_DXLARGE bytes"

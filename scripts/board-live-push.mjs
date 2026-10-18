@@ -23,6 +23,17 @@ import { execFileSync } from 'node:child_process';
 const ARGV = process.argv.slice(2);
 const flagVal = (name) => { const i = ARGV.indexOf(name); return i >= 0 && ARGV[i + 1] && !ARGV[i + 1].startsWith('--') ? ARGV[i + 1] : null; };
 const VALUE_FLAGS = ['--focus-dir', '--board', '--session', '--ledger-dir', '--events-dir', '--tasks-dir', '--now', '--kanban-json', '--wiki-hub'];
+// #3272 F1: refuse any flag we do not know, BEFORE any data read or network call — an unknown flag must
+// never fall through to the real push (the pre-fix live copy honoured --focus-dir, ignored the new print
+// flags and pushed fixture data to the live board). The one legacy bare positional [session] id is kept.
+const BOOL_FLAGS = ['--dry-run', '--json', '--force', '--focuses-only', '--focus-body'];
+for (let ai = 0; ai < ARGV.length; ai++) {
+  const a = ARGV[ai];
+  if (VALUE_FLAGS.includes(a)) { ai += 1; continue; } // its value is consumed, whatever it looks like
+  if (BOOL_FLAGS.includes(a) || !a.startsWith('--')) continue; // a known flag, or the positional session id
+  console.error(`unknown flag: ${a} (known: ${[...VALUE_FLAGS, ...BOOL_FLAGS].join(' ')} [session])`);
+  process.exit(2);
+}
 const DRY = ARGV.includes('--dry-run');
 const HOME = os.homedir();
 const LEDGER_DIR = path.resolve(flagVal('--ledger-dir') || path.join(HOME, '.claude/3role-ledger'));

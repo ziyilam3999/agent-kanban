@@ -3,7 +3,7 @@
 cairn: "board-live" -> working-memory card workflow/session-state-20261009-3085-legs-launchd:42 (receipt tmp/cairn-3278.log) — the #3072 dashboard line: the board page reads the pinned issues through declared loaders, the push feed owns their bodies, and the lanes/execModel passthrough was verified in harness renders. Queries run: "board-live" (hit, that card; two older unrelated board-liveness cards also surfaced).
 cairn-wiki: wiki tier off
 data-class: public
-size: S
+size: M
 
 Task: agent-kanban #3278 — size S, Cost focus. Planner role of the 4-role chain. Intent-level plan (WHAT + WHY + binary AC). Do NOT prescribe HOW beyond the named levers.
 

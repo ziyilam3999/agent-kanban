@@ -34,7 +34,7 @@ const FOCUS_DIR = flagVal('--focus-dir');
 if (FOCUS_DIR) process.env.PROGRESS_FOCUS_PROGRESS = path.join(path.resolve(FOCUS_DIR), 'focus-progress.mjs');
 const FOCUS_SCRIPT = process.env.PROGRESS_FOCUS_PROGRESS || path.join(os.homedir(), '.claude/focus/focus-progress.mjs');
 // #3244 group C: focus cards link their wiki pages. The hub is the flag, else the pointer file the wiki
-// skill documents (~/.claude/wiki-hub/root), else the hub clone that sits beside the ai-brain checkout.
+// skill documents (~/.claude/wiki-hub/root) -- nothing else is guessed (#3263 comment fix).
 // Registry entry whose `covers` names ziyilam3999/ai-brain must carry a `remote`; hub, entry or remote
 // missing -> WIKI_BASE stays null and the cards are byte-identical to today (fail-open: the board never
 // depends on the wiki existing).

@@ -10,6 +10,7 @@
 //   --wiki-hub <dir>     wiki-hub checkout whose registry maps this repo to the child wiki hosting the focus pages (#3244)
 //   --now <iso>          pin the clock (generatedAt, recency windows, status-tables --now)
 //   --dry-run [--json]   build the summary, print it as one JSON object, touch no network, no state file
+//   --focus-body         print the #4 focus-details body (per-ticket focus lists) and exit; no network, no state
 //   BOARD_AI_BRAIN       ai-brain checkout (default ~/coding_projects/ai-brain)
 import fs from 'node:fs';
 import os from 'node:os';
@@ -269,46 +270,8 @@ for (const t of shelfT) {
   const meta = [['kind', t.kind], ['bookkeeping.type', t.bookkeeping?.type], ['bookkeeping.state', t.bookkeeping?.state], ['parked under', t.parkedUnder ? '#' + t.parkedUnder : ''], ['blocked reason', t.blockedReason], ['disposition', t.disposition]].filter(([, v]) => v).map(([k, v]) => k + '=' + scrub(String(v)).slice(0, 120)).join('\n');
   shelfDetails[String(t.id)] = { d: descOf.get(String(t.id)) || '', tl: tlOf(String(t.id)), meta };
 }
-// Focus panel (operator 2026-10-10): the goal from status-tables, the ordered work from the newest
-// reports/*-close-focus-order.md, each ticket's live state from the board.
-let focus = null;
-try {
-  const F = stJson && stJson.focus;
-  const repDir = path.join(AB, '.ai-workspace/reports');
-  const ofile = fs.readdirSync(repDir).filter((n) => /-close-focus-order\.md$/.test(n)).sort().at(-1);
-  const txt = ofile ? fs.readFileSync(path.join(repDir, ofile), 'utf8') : '';
-  const allT = new Map(Object.values(board.tickets).map((t) => [String(t.id), t]));
-  const seen = new Set();
-  const idsIn = (str) => (String(str).match(/#(\d{3,5})/g) || []).map((x) => x.slice(1)).filter((x) => !seen.has(x) && seen.add(x));
-  const stateOf = (id) => {
-    const t = allT.get(id);
-    if (!t) return { state: 'unknown', waits: [] };
-    if (t.status === 'completed') return { state: 'done', waits: [] };
-    const waits = (t.blockedBy || []).map(String).filter((x) => !doneIds.has(x));
-    if (live.has(id)) return { state: 'working', waits };
-    if (waits.length) return { state: 'waiting', waits };
-    if (t.column === 'in_review') return { state: 'review', waits };
-    if (t.status === 'in_progress' || t.column === 'in_progress') return { state: 'started', waits };
-    return { state: 'todo', waits };
-  };
-  const tk = (id) => { const t = allT.get(id); return { id, subject: t ? scrub(t.subject).slice(0, 160) : '', ...stateOf(id) }; };
-  const phases = [];
-  const doneLine = (txt.match(/\*\*Done so far:\*\*([^\n]*)/) || [])[1] || '';
-  const doneTk = idsIn(doneLine).map(tk);
-  let cur = null;
-  for (const line of txt.split('\n')) {
-    const m = /^(\d+)\.\s+\*\*([^*]+)\*\*(.*)$/.exec(line);
-    if (m) {
-      cur = { name: m[2].replace(/\s*\([^)]*\)/g, '').replace(/[:\s]+$/, '').trim(), note: m[3].replace(/[\x60*]/g, '').replace(/#\d{3,5}/g, '').replace(/^[\s:,]+/, '').trim().slice(0, 160), tickets: [] };
-      phases.push(cur); cur.tickets.push(...idsIn(m[3]).map(tk)); continue;
-    }
-    if (cur && /^\s+-/.test(line)) cur.tickets.push(...idsIn(line).map(tk));
-  }
-  if (F || phases.length) {
-    const all = [...doneTk, ...phases.flatMap((x) => x.tickets)];
-    focus = { name: String(F?.goalId || '').replace(/^\d{4}-\d{2}-\d{2}-/, '').replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase()).replace(/\bjev\b/i, 'Jev'), title: scrub(String(F?.title || '').replace(/^FOCUS\s*\([^)]*\):\s*/, '')), since: (String(F?.goalId || '').match(/^\d{4}-\d{2}-\d{2}/) || [''])[0], doneWhen: scrub(F?.doneWhen || ''), tally: F ? { rows: F.tally, yes: F.yes, no: F.no } : null, done: doneTk, phases, total: all.length, doneCount: all.filter((x) => x.state === 'done').length };
-  }
-} catch (e) { focus = null; }
+// #3272: the legacy single-focus block (page-unread since #3123) is gone from the summary —
+// the dashboard's focus surface reads `focuses` + the #4 focus-details issue.
 // Lane cap = the mode SSOT work_ceiling (operator 2026-10-10: 4 lanes = 3 focus + 1 GetSpace); 4 if unreadable.
 // Rework resets later steps (2026-10-10, #3073 merge-conflict round): when the current step has a ledger row
 // newer than a later step's latest row, that later step's old result (an earlier review PASS, a failed ship-tail
@@ -356,13 +319,20 @@ try {
     const key = f.name.toLowerCase();
     // #3244: the two wiki links are derived, never state — same filename contract the ai-brain
     // generator writes (focus-<key>.md + focus-<key>-progress.md in the covering child wiki).
-    const card = { key, name: f.name, label, goal: o.goal ?? (f.goal || ''), lanes: o.lanes ?? f.lanes, state: o.state || (f.open === 0 ? 'done' : 'active'), pausedReason: o.pausedReason ?? null, done: o.done ?? f.done, open: o.open ?? f.open, in_progress: o.in_progress ?? f.in_progress, total, tickets };
+    const card = { key, name: f.name, label, goal: o.goal ?? (f.goal || ''), lanes: o.lanes ?? f.lanes, state: o.state || (f.open === 0 ? 'done' : 'active'), pausedReason: o.pausedReason ?? null, done: o.done ?? f.done, open: o.open ?? f.open, in_progress: o.in_progress ?? f.in_progress, total, wtdPct: o.wtdPct ?? null, unsized: o.unsized ?? null, tickets };
     if (WIKI_BASE) { card.wiki = WIKI_BASE + 'focus-' + key + '.md'; card.wikiProgress = WIKI_BASE + 'focus-' + key + '-progress.md'; }
     return card;
   });
   focusTotals = focuses.reduce((a, f) => ({ done: a.done + f.done, open: a.open + f.open, total: a.total + f.total, active: a.active + (f.state === 'active' ? 1 : 0), paused: a.paused + (f.state === 'paused' ? 1 : 0), finished: a.finished + (f.state === 'done' ? 1 : 0) }), { done: 0, open: 0, total: 0, active: 0, paused: 0, finished: 0 });
 } catch (e) { console.error('focuses: ' + (e && e.message)); }
+// #3272: the per-ticket focus lists move wholesale to their OWN pinned issue (#4) — the forever-growing
+// mass (all focus tickets ever, done included) leaves the summary, which keeps one slim card per focus
+// (every scalar, plus the merged size-weighted % passed through untouched: one derivation, in status-tables).
+const focusTickets = Object.fromEntries(focuses.map((f) => [f.key, f.tickets]));
+for (const f of focuses) delete f.tickets;
+const focusBody = JSON.stringify({ generatedAt: snap.generatedAt, focusTickets });
 if (process.argv.includes('--focuses-only')) { process.stdout.write(JSON.stringify(focuses)); process.exit(0); }
+if (process.argv.includes('--focus-body')) { process.stdout.write(focusBody + '\n'); process.exit(0); }
 let jevResearch = null;
 try {
   const R = JSON.parse(fs.readFileSync(path.join(JEV, 'board-research.json'), 'utf8'));
@@ -385,9 +355,9 @@ try {
   };
 } catch (e) { console.error('jevResearch: ' + (e && e.message)); }
 const laneCap = (() => { const m = /^work_ceiling=(\d+)$/m.exec(run(["hooks/3role-ledger.mjs", "resolve-mode"])); return m ? Number(m[1]) : 4; })();
-const summary = JSON.stringify({ focus, focuses, focusTotals, jevResearch, generatedAt: snap.generatedAt, counts, rows: active, shelfRows, seats, lanes: lanes.filter((l) => l.recent), laneCap, jev, shelf, laneSource: kb ? 'kanban' : 'ledger' });
+const summary = JSON.stringify({ focuses, focusTotals, jevResearch, generatedAt: snap.generatedAt, counts, rows: active, shelfRows, seats, lanes: lanes.filter((l) => l.recent), laneCap, jev, shelf, laneSource: kb ? 'kanban' : 'ledger' });
 const detailBody = JSON.stringify({ generatedAt: snap.generatedAt, details });
-const PINNED = { 'board-live summary (auto)': '1', 'board-live details (auto)': '2', 'board-live shelf details (auto)': '3' };
+const PINNED = { 'board-live summary (auto)': '1', 'board-live focus details (auto)': '4', 'board-live details (auto)': '2', 'board-live shelf details (auto)': '3' };
 function upsertIssue(title, text) {
   if (text.length > 60000) throw new Error(`${title} too large: ${text.length}`);
   let n = PINNED[title] || '';
@@ -401,10 +371,11 @@ function upsertIssue(title, text) {
 }
 if (DRY) { process.stdout.write(JSON.stringify(JSON.parse(summary)) + '\n'); process.exit(0); }
 const STATE = path.join(os.homedir(), '.claude/board-live/state.json');
-const hash = (await import('node:crypto')).createHash('sha256').update([summary, detailBody, JSON.stringify({ generatedAt: snap.generatedAt, details: shelfDetails })].join('\n').split(snap.generatedAt).join('')).digest('hex');
+const hash = (await import('node:crypto')).createHash('sha256').update([summary, focusBody, detailBody, JSON.stringify({ generatedAt: snap.generatedAt, details: shelfDetails })].join('\n').split(snap.generatedAt).join('')).digest('hex'); // #3272: the change-skip hash covers the #4 body too
 let prev = {}; try { prev = JSON.parse(fs.readFileSync(STATE, 'utf8')); } catch {}
 if (!process.argv.includes('--force') && prev.hash === hash && Date.now() - (prev.at || 0) < 10 * 60 * 1000) { console.log('skip: unchanged since ' + new Date(prev.at).toISOString()); process.exit(0); }
 upsertIssue('board-live summary (auto)', summary);
+upsertIssue('board-live focus details (auto)', focusBody);
 upsertIssue('board-live details (auto)', detailBody);
 upsertIssue('board-live shelf details (auto)', JSON.stringify({ generatedAt: snap.generatedAt, details: shelfDetails }));
 fs.writeFileSync(STATE, JSON.stringify({ hash, at: Date.now() }));

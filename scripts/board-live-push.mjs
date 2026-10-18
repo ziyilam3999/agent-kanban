@@ -11,6 +11,7 @@
 //   --now <iso>          pin the clock (generatedAt, recency windows, status-tables --now)
 //   --dry-run [--json]   build the summary, print it as one JSON object, touch no network, no state file
 //   --focus-body         print the #4 focus-details body (per-ticket focus lists) and exit; no network, no state
+//   --details-body       print the #2 details body (per-ticket description + timeline) and exit; no network, no state
 //   BOARD_AI_BRAIN       ai-brain checkout (default ~/coding_projects/ai-brain)
 import fs from 'node:fs';
 import os from 'node:os';
@@ -26,7 +27,7 @@ const VALUE_FLAGS = ['--focus-dir', '--board', '--session', '--ledger-dir', '--e
 // #3272 F1: refuse any flag we do not know, BEFORE any data read or network call — an unknown flag must
 // never fall through to the real push (the pre-fix live copy honoured --focus-dir, ignored the new print
 // flags and pushed fixture data to the live board). The one legacy bare positional [session] id is kept.
-const BOOL_FLAGS = ['--dry-run', '--json', '--force', '--focuses-only', '--focus-body'];
+const BOOL_FLAGS = ['--dry-run', '--json', '--force', '--focuses-only', '--focus-body', '--details-body'];
 for (let ai = 0; ai < ARGV.length; ai++) {
   const a = ARGV[ai];
   if (VALUE_FLAGS.includes(a)) { ai += 1; continue; } // its value is consumed, whatever it looks like
@@ -270,9 +271,25 @@ const tlOf = (id) => {
   const rows = lines(path.join(LEDGER_DIR, SID, id + '.jsonl')).filter((r) => r && r.role && r.ts);
   return JSON.stringify(rows.sort((x, y) => String(x.ts).localeCompare(String(y.ts))).slice(-10).map((r) => ({ r: String(r.role), t: r.ts, c: r.closedAt || null, v: r.verdict ? String(r.verdict).slice(0, 20) : '', m: r.modelVersion ? (r.provider === 'zai' || r.dispatch === 'subprocess-zai' ? 'z.ai ' : '') + String(r.modelVersion).replace(/^claude-/, '') : '', e: r.effort ? String(r.effort) : '', a: r.artifact_path ? scrub(String(r.artifact_path)).split('/').pop() : '' })));
 };
+// #3278: the #2 body back under the 60000 cap WITH headroom (target ≤ 50000 on today's shape), by
+// construction — per-entry trim (description ≤ 240, the 6 MOST RECENT timeline rows) plus a
+// per-section row cap: every recent lane plus at most 24 of the most-recently-updated active
+// tickets (worst case then (laneCap + 24) × the per-entry bound, a constant). Tickets outside the
+// cap still ride #1; their sheet falls back to the page's existing no-entry rendering. Separate
+// trimmed helpers, NOT descOf/tlOf: the shelf body (#3, under cap, untouched by this ticket) keeps
+// the 420/10 shape byte-identical.
+const DETAIL_DESC_MAX = 240;
+const DETAIL_TL_MAX = 6;
+const DETAIL_ACTIVE_MAX = 24;
+const descTrim = (d) => d.length > DETAIL_DESC_MAX ? d.slice(0, DETAIL_DESC_MAX - 1).replace(/\s+\S*$/, '') + '…' : d;
+const tlTrimOf = (id) => {
+  if (!SID) return '';
+  const rows = lines(path.join(LEDGER_DIR, SID, id + '.jsonl')).filter((r) => r && r.role && r.ts);
+  return JSON.stringify(rows.sort((x, y) => String(x.ts).localeCompare(String(y.ts))).slice(-DETAIL_TL_MAX).map((r) => ({ r: String(r.role), t: r.ts, c: r.closedAt || null, v: r.verdict ? String(r.verdict).slice(0, 20) : '', m: r.modelVersion ? (r.provider === 'zai' || r.dispatch === 'subprocess-zai' ? 'z.ai ' : '') + String(r.modelVersion).replace(/^claude-/, '') : '', e: r.effort ? String(r.effort) : '', a: r.artifact_path ? scrub(String(r.artifact_path)).split('/').pop() : '' })));
+};
 const details = {};
-for (const r of active) details[r.id] = { d: descOf.get(r.id) || '', tl: r.column !== 'todo' ? tlOf(r.id) : '' };
-for (const l of lanes.filter((x) => x.recent)) details[l.id] = { d: descOf.get(l.id) || '', tl: tlOf(l.id) };
+for (const r of [...active].sort((x, y) => String(y.updatedAt).localeCompare(String(x.updatedAt))).slice(0, DETAIL_ACTIVE_MAX)) details[r.id] = { d: descTrim(descOf.get(r.id) || ''), tl: r.column !== 'todo' ? tlTrimOf(r.id) : '' };
+for (const l of lanes.filter((x) => x.recent)) details[l.id] = { d: descTrim(descOf.get(l.id) || ''), tl: tlTrimOf(l.id) };
 // Shelf (kanban Shelf parity): open non-work tickets grouped by kind; their detail lives in a third issue.
 const shelfT = Object.values(board.tickets).filter((t) => t.status !== 'completed' && t.column !== 'done' && t.kind && t.kind !== 'work');
 const shelfRows = shelfT.map((t) => ({ id: String(t.id), subject: scrub(String(t.subject)).slice(0, 160), kind: t.kind, type: t.bookkeeping?.type || '', column: t.column, updatedAt: new Date(Number(t.updatedAt) || Date.parse(t.updatedAt)).toISOString() }));
@@ -367,7 +384,11 @@ try {
 } catch (e) { console.error('jevResearch: ' + (e && e.message)); }
 const laneCap = (() => { const m = /^work_ceiling=(\d+)$/m.exec(run(["hooks/3role-ledger.mjs", "resolve-mode"])); return m ? Number(m[1]) : 4; })();
 const summary = JSON.stringify({ focuses, focusTotals, jevResearch, generatedAt: snap.generatedAt, counts, rows: active, shelfRows, seats, lanes: lanes.filter((l) => l.recent), laneCap, jev, shelf, laneSource: kb ? 'kanban' : 'ledger' });
-const detailBody = JSON.stringify({ generatedAt: snap.generatedAt, details });
+// #3278: the #2 body carries ONLY the loader's read set — the page's details loader reads v.details
+// (per entry d/tl) and never the top-level generatedAt (the stale-body check compares #1's against
+// #4's; the render harness fixture already omits it), so it is dropped for headroom.
+const detailBody = JSON.stringify({ details });
+if (process.argv.includes('--details-body')) { process.stdout.write(detailBody + '\n'); process.exit(0); }
 const PINNED = { 'board-live summary (auto)': '1', 'board-live focus details (auto)': '4', 'board-live details (auto)': '2', 'board-live shelf details (auto)': '3' };
 function upsertIssue(title, text) {
   if (text.length > 60000) throw new Error(`${title} too large: ${text.length}`);

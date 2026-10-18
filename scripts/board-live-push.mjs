@@ -7,6 +7,7 @@
 //   --events-dir <dir>   step-log events root (default: the ledger dir; the old rules do not read events yet)
 //   --tasks-dir <dir>    task-store root (default ~/.claude/tasks); status-tables reads it too
 //   --kanban-json <file> frozen kanban selector state ({active, lanes}) fed to the parity block instead of spawning the selectors
+//   --wiki-hub <dir>     wiki-hub checkout whose registry maps this repo to the child wiki hosting the focus pages (#3244)
 //   --now <iso>          pin the clock (generatedAt, recency windows, status-tables --now)
 //   --dry-run [--json]   build the summary, print it as one JSON object, touch no network, no state file
 //   BOARD_AI_BRAIN       ai-brain checkout (default ~/coding_projects/ai-brain)
@@ -20,7 +21,7 @@ import { execFileSync } from 'node:child_process';
 // PROGRESS_FOCUS_PROGRESS, which status-tables honours.
 const ARGV = process.argv.slice(2);
 const flagVal = (name) => { const i = ARGV.indexOf(name); return i >= 0 && ARGV[i + 1] && !ARGV[i + 1].startsWith('--') ? ARGV[i + 1] : null; };
-const VALUE_FLAGS = ['--focus-dir', '--board', '--session', '--ledger-dir', '--events-dir', '--tasks-dir', '--now', '--kanban-json'];
+const VALUE_FLAGS = ['--focus-dir', '--board', '--session', '--ledger-dir', '--events-dir', '--tasks-dir', '--now', '--kanban-json', '--wiki-hub'];
 const DRY = ARGV.includes('--dry-run');
 const HOME = os.homedir();
 const LEDGER_DIR = path.resolve(flagVal('--ledger-dir') || path.join(HOME, '.claude/3role-ledger'));
@@ -32,6 +33,20 @@ const NOW_MS = NOW_ISO ? Date.parse(NOW_ISO) : Date.now();
 const FOCUS_DIR = flagVal('--focus-dir');
 if (FOCUS_DIR) process.env.PROGRESS_FOCUS_PROGRESS = path.join(path.resolve(FOCUS_DIR), 'focus-progress.mjs');
 const FOCUS_SCRIPT = process.env.PROGRESS_FOCUS_PROGRESS || path.join(os.homedir(), '.claude/focus/focus-progress.mjs');
+// #3244 group C: focus cards link their wiki pages. The hub is the flag, else the pointer file the wiki
+// skill documents (~/.claude/wiki-hub/root), else the hub clone that sits beside the ai-brain checkout.
+// Registry entry whose `covers` names ziyilam3999/ai-brain must carry a `remote`; hub, entry or remote
+// missing -> WIKI_BASE stays null and the cards are byte-identical to today (fail-open: the board never
+// depends on the wiki existing).
+const WIKI_HUB = flagVal('--wiki-hub') || (() => { try { return fs.readFileSync(path.join(HOME, '.claude/wiki-hub/root'), 'utf8').trim(); } catch { return ''; } })();
+let WIKI_BASE = null;
+if (WIKI_HUB) {
+  try {
+    const reg = JSON.parse(fs.readFileSync(path.join(path.resolve(WIKI_HUB), 'registry.json'), 'utf8'));
+    const e = (reg.entries || []).find((x) => (Array.isArray(x.covers) ? x.covers : [x.covers]).includes('ziyilam3999/ai-brain'));
+    if (e && e.remote) WIKI_BASE = 'https://github.com/' + String(e.remote).replace(/^github\.com\//, '') + '/blob/main/';
+  } catch {}
+}
 const REPO = 'ziyilam3999/agent-board-data';
 const FILE = 'board-live.json';
 const BOARD_FILE = path.resolve(flagVal('--board') || path.join(HOME, 'coding_projects/agent-kanban/data/board.json'));
@@ -338,7 +353,12 @@ try {
       }
       return t;
     });
-    return { key: f.name.toLowerCase(), name: f.name, label, goal: o.goal ?? (f.goal || ''), lanes: o.lanes ?? f.lanes, state: o.state || (f.open === 0 ? 'done' : 'active'), pausedReason: o.pausedReason ?? null, done: o.done ?? f.done, open: o.open ?? f.open, in_progress: o.in_progress ?? f.in_progress, total, tickets };
+    const key = f.name.toLowerCase();
+    // #3244: the two wiki links are derived, never state — same filename contract the ai-brain
+    // generator writes (focus-<key>.md + focus-<key>-progress.md in the covering child wiki).
+    const card = { key, name: f.name, label, goal: o.goal ?? (f.goal || ''), lanes: o.lanes ?? f.lanes, state: o.state || (f.open === 0 ? 'done' : 'active'), pausedReason: o.pausedReason ?? null, done: o.done ?? f.done, open: o.open ?? f.open, in_progress: o.in_progress ?? f.in_progress, total, tickets };
+    if (WIKI_BASE) { card.wiki = WIKI_BASE + 'focus-' + key + '.md'; card.wikiProgress = WIKI_BASE + 'focus-' + key + '-progress.md'; }
+    return card;
   });
   focusTotals = focuses.reduce((a, f) => ({ done: a.done + f.done, open: a.open + f.open, total: a.total + f.total, active: a.active + (f.state === 'active' ? 1 : 0), paused: a.paused + (f.state === 'paused' ? 1 : 0), finished: a.finished + (f.state === 'done' ? 1 : 0) }), { done: 0, open: 0, total: 0, active: 0, paused: 0, finished: 0 });
 } catch (e) { console.error('focuses: ' + (e && e.message)); }

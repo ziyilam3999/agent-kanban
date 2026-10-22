@@ -307,23 +307,24 @@ const lessonMerge = mergeLog.capped ? lmQuiet('row log over the count cap; not c
 // for outranks the committed set (rows never lag an active trial) and renders as an UNREGISTERED version
 // with its rows counted — a missing prereg never hides real rows; a committed supersedes retires that
 // version however many rows it holds. Only the ended-verdict text stays a static map keyed by version: no
-// committed machine-readable field carries it. INPUT-BOUND: at most FH_PREREG_CAP preregs are read; past
-// the cap none are trusted (every rows-log version renders unregistered) — fail closed, never a hidden row.
+// committed machine-readable field carries it. INPUT-BOUND (fix2 R2-3): the cap bounds the FILES READ,
+// not just the trusted set — the trials dir is listed once and, at FH_PREREG_CAP entries or fewer, at
+// most that many preregistration files are read; past the cap NO file is read and none are trusted
+// (every rows-log version renders unregistered) — fail closed, never a hidden row.
 const FH_ROOT_VERSION = '2907';
 const FH_LEGACY_VERSION = { '2907-jev-file-hint-shadow': '2907', '3031-jev-2907-shadow-v2': '3031-v2' };
 const FH_ENDED_TEXT = { '3031-v2': 'ended INCONCLUSIVE (#3080)' }; // the #3080 verdict is prose, keyed by version
 const FH_PREREG_CAP = 64;
 let fhAll = [];
-try {
-  fhAll = fs.readdirSync(path.join(AB, '.ai-workspace/trials')).sort().map((dir) => {
-    let p = null; try { p = JSON.parse(fs.readFileSync(path.join(AB, '.ai-workspace/trials', dir, 'preregistration.json'), 'utf8')); } catch { return null; }
-    const version = p.prereg_version != null ? String(p.prereg_version) : (FH_LEGACY_VERSION[dir] ?? null);
-    if (version == null) return null; // another trial's prereg: not a versioned file-hint shape
-    const n = p.n_min != null ? p.n_min : (p.design || {}).n_min;
-    return { dir, version, id: /^(\d+)/.exec(dir)?.[1] || null, nMin: n != null && Number(n) > 0 ? Number(n) : null, supersedes: p.supersedes != null ? String(p.supersedes) : null, frozenAt: String(p.frozen_at || '') };
-  }).filter(Boolean);
-} catch {}
-if (fhAll.length > FH_PREREG_CAP) { console.error('fileHint: ' + fhAll.length + ' preregs over cap ' + FH_PREREG_CAP + '; trusting none'); fhAll = []; }
+let fhDirs = []; try { fhDirs = fs.readdirSync(path.join(AB, '.ai-workspace/trials')).sort(); } catch {}
+if (fhDirs.length > FH_PREREG_CAP) console.error('fileHint: ' + fhDirs.length + ' trial prereg dirs over cap ' + FH_PREREG_CAP + '; reading none, trusting none');
+else fhAll = fhDirs.map((dir) => {
+  let p = null; try { p = JSON.parse(fs.readFileSync(path.join(AB, '.ai-workspace/trials', dir, 'preregistration.json'), 'utf8')); } catch { return null; }
+  const version = p.prereg_version != null ? String(p.prereg_version) : (FH_LEGACY_VERSION[dir] ?? null);
+  if (version == null) return null; // another trial's prereg: not a versioned file-hint shape
+  const n = p.n_min != null ? p.n_min : (p.design || {}).n_min;
+  return { dir, version, id: /^(\d+)/.exec(dir)?.[1] || null, nMin: n != null && Number(n) > 0 ? Number(n) : null, supersedes: p.supersedes != null ? String(p.supersedes) : null, frozenAt: String(p.frozen_at || '') };
+}).filter(Boolean);
 const fhByVer = new Map(fhAll.map((p) => [p.version, p]));
 const fhInFamily = (p) => {
   let v = p.version; // walk the supersedes chain toward the root; hop-capped so a cycle cannot loop

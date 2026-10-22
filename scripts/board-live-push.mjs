@@ -8,6 +8,7 @@
 //   --tasks-dir <dir>    task-store root (default ~/.claude/tasks); status-tables reads it too
 //   --kanban-json <file> frozen kanban selector state ({active, lanes}) fed to the parity block instead of spawning the selectors
 //   --wiki-hub <dir>     wiki-hub checkout whose registry maps this repo to the child wiki hosting the focus pages (#3244)
+//   --jev-dir <dir>      private Jev store root (default ~/.claude/jev); the #3121 fixture smokes and the render harness redirect it
 //   --now <iso>          pin the clock (generatedAt, recency windows, status-tables --now)
 //   --dry-run [--json]   build the summary, print it as one JSON object, touch no network, no state file
 //   --focus-body         print the #4 focus-details body (per-ticket focus lists) and exit; no network, no state
@@ -23,7 +24,7 @@ import { execFileSync } from 'node:child_process';
 // PROGRESS_FOCUS_PROGRESS, which status-tables honours.
 const ARGV = process.argv.slice(2);
 const flagVal = (name) => { const i = ARGV.indexOf(name); return i >= 0 && ARGV[i + 1] && !ARGV[i + 1].startsWith('--') ? ARGV[i + 1] : null; };
-const VALUE_FLAGS = ['--focus-dir', '--board', '--session', '--ledger-dir', '--events-dir', '--tasks-dir', '--now', '--kanban-json', '--wiki-hub'];
+const VALUE_FLAGS = ['--focus-dir', '--board', '--session', '--ledger-dir', '--events-dir', '--tasks-dir', '--now', '--kanban-json', '--wiki-hub', '--jev-dir'];
 // #3272 F1: refuse any flag we do not know, BEFORE any data read or network call — an unknown flag must
 // never fall through to the real push (the pre-fix live copy honoured --focus-dir, ignored the new print
 // flags and pushed fixture data to the live board). The one legacy bare positional [session] id is kept.
@@ -125,8 +126,21 @@ try { const st = stJson = JSON.parse(run(['skills/progress-summary/bin/status-ta
 const lines = (f) => { try { return fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return []; } };
 const tkey = (r) => Date.parse(r.closedAt || r.ts || r.openedAt || 0) || 0;
 const ledger = (id) => SID ? lines(path.join(LEDGER_DIR, SID, id + '.jsonl')).filter((r) => r && r.role).sort((x, y) => tkey(x) - tkey(y)) : [];
-const JEV = path.join(os.homedir(), '.claude/jev');
-const hint = lines(path.join(JEV, 'file-hint-shadow/rows.jsonl'));
+// #3121: --jev-dir redirects the private Jev store (fixture smokes, render harness); the live default is
+// unchanged. INPUT-BOUND: a trial rows log past TRIAL_ROW_CAP lines fails closed — that trial renders no
+// numbers at all, because a count off a truncated read must never publish as progress.
+const JEV = path.resolve(flagVal('--jev-dir') || path.join(HOME, '.claude/jev'));
+const TRIAL_ROW_CAP = 20000;
+const trialRows = (rel) => {
+  const out = { rows: [], capped: false };
+  let raw; try { raw = fs.readFileSync(path.join(JEV, rel), 'utf8'); } catch { return out; }
+  const ls = raw.split('\n');
+  if (ls.length > TRIAL_ROW_CAP + 1) return { rows: [], capped: true }; // +1: a trailing newline is not a row
+  for (const l of ls) { if (!l) continue; try { out.rows.push(JSON.parse(l)); } catch {} }
+  return out;
+};
+const hintLog = trialRows('file-hint-shadow/rows.jsonl');
+const hint = hintLog.rows;
 const FLOW = ['research', 'planner', 'plan-review', 'executor', 'execution-review', 'ship-tail'];
 const flowOf = (id, isLive) => {
   const rows = ledger(id);
@@ -255,13 +269,79 @@ for (const l of lanes) {
   l.stage = scrub(String(t.metadata.lane_stage || "orchestrator working")); l.role = "orchestrator";
   l.seat = "Claude (main session)"; l.effort = l.effort || null;
 }
-const merge = lines(path.join(JEV, 'lesson-merge-shadow/rows.jsonl'));
+// #3121 honest Jev numbers: progress counts ONLY judged-AND-labelled rows toward the preregistered n_min
+// — never the raw row count, never n_target; the not-judged backlog is its own visible number; the Haiku
+// line is agreement between rows BOTH models answered in the CURRENT trial version (v1 rows carry no
+// prereg_version and belong to no version); a superseded or concluded trial renders its version + ended
+// state, never a progress bar. Only counts, timestamps and enum names leave the trial data.
+const mergeLog = trialRows('lesson-merge-shadow/rows.jsonl');
+const merge = mergeLog.rows;
 const both = merge.filter((r) => r.jev_pick != null && r.base_pick != null);
-const hintOk = hint.filter((r) => r.jev_status === 'ok');
-const jev = {
-  fileHint: { rows: hint.length, ok: hintOk.length, target: 100, agreeTop1: hintOk.filter((r) => (r.jev_top3 || [])[0] && (r.jev_top3 || [])[0] === (r.haiku_top3 || [])[0]).length, last: hint.at(-1)?.ts || null },
-  lessonMerge: { rows: merge.length, scored: both.length, agree: both.filter((r) => r.jev_pick === r.base_pick).length, target: 400, last: merge.at(-1)?.ts || null },
+const isLabelled = (r) => r.label != null && r.label_src != null; // a labeller-UNSURE row carries label:null and never counts
+const lmJudged = merge.filter((r) => r.jev_status === 'ok');
+const LM_N_MIN = 300; // the committed 2886 lesson-merge prereg n_min (n_target 400 is not the board basis)
+const lmQuiet = (state) => ({ version: '2886', labelled: null, judged: null, notJudged: null, nMin: LM_N_MIN, scored: null, agree: null, last: null, state });
+const lessonMerge = mergeLog.capped ? lmQuiet('row log over the count cap; not counted') : {
+  version: '2886',
+  labelled: lmJudged.filter(isLabelled).length,
+  judged: lmJudged.length,
+  notJudged: merge.length - lmJudged.length,
+  nMin: LM_N_MIN,
+  scored: both.length,
+  agree: both.filter((r) => r.jev_pick === r.base_pick).length,
+  last: merge.at(-1)?.ts || null,
+  state: merge.length ? '' : 'no rows yet',
 };
+// #3121 version-selection rule (plan amendment F1): current = the newest file-hint prereg_version among
+// the rows log and the committed preregs, newest by the supersedes chain (frozen_at breaks ties); a
+// rows-log version no committed prereg accounts for outranks the committed set (rows never lag an active
+// trial); a committed supersedes retires that version however many rows it holds. The chain's trial dirs
+// and the ended note's finalize ticket are hardcoded (named risk 3121-version-rule-hardcode): no
+// committed machine-readable field carries them.
+const FH_TRIALS = [
+  { dir: '2907-jev-file-hint-shadow', version: '2907' },
+  { dir: '3031-jev-2907-shadow-v2', version: '3031-v2', ended: 'ended INCONCLUSIVE (#3080)' },
+  { dir: '3164-jev-file-hint-v3', version: '3164-v3' },
+];
+const fhPreregs = FH_TRIALS.map((t) => {
+  let p = null; try { p = JSON.parse(fs.readFileSync(path.join(AB, '.ai-workspace/trials', t.dir, 'preregistration.json'), 'utf8')); } catch {}
+  const n = p ? (p.n_min != null ? p.n_min : (p.design || {}).n_min) : null; // 3164-v3 keeps n_min under design
+  return { version: t.version, ended: t.ended || '', nMin: n != null && Number(n) > 0 ? Number(n) : null, supersedes: p && p.supersedes != null ? String(p.supersedes) : null, frozenAt: p ? String(p.frozen_at || '') : '' };
+});
+const fhCommitted = new Map(fhPreregs.map((p) => [p.version, p]));
+const fhRetired = new Set(fhPreregs.map((p) => p.supersedes).filter(Boolean));
+const fhVerOf = (r) => String(r.prereg_version ?? '').trim();
+const fhRowVersions = [...new Set(hint.map(fhVerOf).filter(Boolean))];
+const fhNewestTs = (v) => Math.max(0, ...hint.filter((r) => fhVerOf(r) === v).map((r) => Date.parse(r.ts || 0) || 0));
+const fhUnaccounted = fhRowVersions.filter((v) => !fhCommitted.has(v) && !fhRetired.has(v)).sort((a, b) => fhNewestTs(b) - fhNewestTs(a));
+const fhVersion = fhUnaccounted[0]
+  || [...new Set([...fhRowVersions, ...fhCommitted.keys()])].filter((v) => !fhRetired.has(v))
+    .sort((a, b) => String((fhCommitted.get(b) || {}).frozenAt || '').localeCompare(String((fhCommitted.get(a) || {}).frozenAt || '')) || (a < b ? 1 : a > b ? -1 : 0))[0]
+  || null;
+const fhCur = fhVersion == null ? [] : hint.filter((r) => fhVerOf(r) === fhVersion);
+const fhJudged = fhCur.filter((r) => r.jev_status === 'ok');
+const fhBoth = fhJudged.filter((r) => (r.jev_top3 || [])[0] != null && (r.haiku_top3 || [])[0] != null);
+const fhQuiet = (state) => ({ version: fhVersion, nMin: (fhCommitted.get(fhVersion) || {}).nMin ?? null, labelled: null, judged: null, notJudged: null, agreeTop1: null, bothAnswered: null, last: null, state, ended: [] });
+const fhEnded = [...new Set([...fhRowVersions, ...fhCommitted.keys()])]
+  .filter((v) => v !== fhVersion && (fhRetired.has(v) || (fhCommitted.get(v) || {}).ended))
+  .map((v) => ({ version: v, state: (fhCommitted.get(v) || {}).ended || 'superseded' }));
+// a concluded CURRENT version renders its ended state too, never a live bar (the 3031-v2 class)
+const fhConcluded = (fhCommitted.get(fhVersion) || {}).ended || '';
+const fileHint = hintLog.capped ? fhQuiet('row log over the count cap; not counted')
+  : fhConcluded ? fhQuiet(fhConcluded)
+  : {
+    version: fhVersion,
+    nMin: (fhCommitted.get(fhVersion) || {}).nMin ?? null,
+    labelled: fhJudged.filter(isLabelled).length,
+    judged: fhJudged.length,
+    notJudged: fhCur.length - fhJudged.length,
+    agreeTop1: fhBoth.filter((r) => (r.jev_top3 || [])[0] === (r.haiku_top3 || [])[0]).length,
+    bothAnswered: fhBoth.length,
+    last: fhCur.at(-1)?.ts || null,
+    state: fhCur.length ? '' : 'no rows yet',
+    ended: fhEnded,
+  };
+const jev = { lessonMerge, fileHint };
 const shelf = kb ? kb.shelf : {};
 // Detail sheet (kanban Drawer parity): description + black-box timeline, JSON-encoded strings so the
 // Dashboard's cell flattening cannot mangle them. Timeline only for lane / in-progress / in-review rows.
@@ -379,16 +459,17 @@ try {
   const subjOf = (id) => { try { return cleanSubj(JSON.parse(fs.readFileSync(path.join(TASKS_DIR, SID || '', id + '.json'), 'utf8')).subject); } catch { return ''; } };
   const liveLog = lines(path.join(JEV, 'live-judgements.jsonl'));
   const today = new Date(NOW_MS).toISOString().slice(0, 10);
-  const mergeStatus = merge.reduce((o, r) => { o[r.jev_status] = (o[r.jev_status] || 0) + 1; return o; }, {});
-  const labelled = merge.filter((r) => r.label_src === 'labeller').length;
+  // #3121 F2: the research note's labelled count is label non-null AND label_src 'labeller' — a
+  // labeller-UNSURE row (label null) is waiting, not labelled.
+  const labellerLabelled = merge.filter((r) => r.label != null && r.label_src === 'labeller').length;
   jevResearch = {
     asOf: R.asOf, rule: R.rule, testRule: R.testRule,
     liveToday: liveLog.filter((r) => String(r.ts || '').startsWith(today)).length, liveTotal: liveLog.length,
     firstLive: R.firstLive, wins: R.wins, loses: R.loses, model: R.model, calibration: R.calibration, costPerCall: R.costPerCall, latency: R.latency,
     road: (R.road || []).map((id) => ({ id: String(id), status: taskStatus(id), subject: subjOf(id) })),
     shadows: [
-      { name: 'Lesson merge', id: '2886', rows: merge.length, target: 400, answered: mergeStatus.ok || 0, note: labelled ? labelled + ' rows labelled' : 'collected; waiting for the blind labeller' },
-      { name: 'File hints', id: '2907', rows: hint.length, target: 100, answered: hintOk.length, note: hint.length ? '' : 'no rows yet' },
+      { name: 'Lesson merge', id: '2886', version: '2886', nMin: lessonMerge.nMin, labelled: lessonMerge.labelled, judged: lessonMerge.judged, notJudged: lessonMerge.notJudged, state: lessonMerge.state, ended: [], note: labellerLabelled ? labellerLabelled + ' rows labelled' : 'collected; waiting for the blind labeller' },
+      { name: 'File hints', id: '3164', version: fileHint.version, nMin: fileHint.nMin, labelled: fileHint.labelled, judged: fileHint.judged, notJudged: fileHint.notJudged, state: fileHint.state, ended: fileHint.ended, note: (fileHint.judged || 0) ? '' : 'no rows yet' },
     ],
   };
 } catch (e) { console.error('jevResearch: ' + (e && e.message)); }

@@ -321,14 +321,20 @@ for (const l of lanes) {
 // Focus lists, goals and lane shares come from ~/.claude/focus (SSOT); live step/seat/effort from the lane rows above.
 const cleanSubj = (s) => scrub(String(s || '').replace(/^(\s*\[[^\]]*\])+\s*/, '')).slice(0, 140);
 let focuses = []; let focusTotals = null;
+// #3290 fix r1: the old catch just logged here and the push shipped with focuses=[] — no focus cards,
+// the #4 focus lists wiped. focusFail carries the cause CLASS only (never the raw error message,
+// which embeds the focus-script path) and the guard below turns it into a pre-upsert abort.
+let focusFail = null;
 try {
   // One derivation (#3123): focus-level values come from status-tables focus.foci (never recomputed here), the ordered
   // tickets from focus-progress --json-full (the same script status-tables spawns), the live step/model/effort from
   // status-tables lanes.rows of the WORK pool (ship-tail rows never leak into a focus card).
   const FF = JSON.parse(execFileSync(process.execPath, [FOCUS_SCRIPT, '--json-full'], { encoding: 'utf8', timeout: 20000, cwd: path.dirname(FOCUS_SCRIPT) }));
-  const foci = new Map((stJson && stJson.focus && stJson.focus.foci || []).map((x) => [x.name, x]));
+  // #3290 fix r1: names are joined on their trimmed form — whitespace-only drift between the two
+  // readers of the same focus SSOT must not read as a broken join.
+  const foci = new Map((stJson && stJson.focus && stJson.focus.foci || []).map((x) => [String(x.name ?? '').trim(), x]));
   focuses = FF.map((f) => {
-    const o = foci.get(f.name) || {};
+    const o = foci.get(String(f.name ?? '').trim()) || {};
     const label = o.label || f.name;
     const total = o.total ?? f.total;
     const tickets = f.rows.map((r) => {
@@ -352,7 +358,11 @@ try {
     return card;
   });
   focusTotals = focuses.reduce((a, f) => ({ done: a.done + f.done, open: a.open + f.open, total: a.total + f.total, active: a.active + (f.state === 'active' ? 1 : 0), paused: a.paused + (f.state === 'paused' ? 1 : 0), finished: a.finished + (f.state === 'done' ? 1 : 0) }), { done: 0, open: 0, total: 0, active: 0, paused: 0, finished: 0 });
-} catch (e) { console.error('focuses: ' + (e && e.message)); }
+} catch (e) {
+  focusFail = e && e.code === 'ENOENT' ? 'focus-progress script missing'
+    : e instanceof SyntaxError ? 'focus-progress output not valid JSON'
+    : 'focus-progress run failed (non-zero exit or timeout)';
+}
 // #3272: the per-ticket focus lists move wholesale to their OWN pinned issue (#4) — the forever-growing
 // mass (all focus tickets ever, done included) leaves the summary, which keeps one slim card per focus
 // (every scalar, plus the merged size-weighted % passed through untouched: one derivation, in status-tables).
@@ -412,9 +422,32 @@ if (DRY) { process.stdout.write(JSON.stringify(JSON.parse(summary)) + '\n'); pro
 // The step-row half (stRow) alone is NOT an abort signal: a board with no running work lanes is a legal
 // quiet board; foci is the one field that separates "dead join" from "nothing running".
 const stFoci = (stJson && stJson.focus && stJson.focus.foci) || [];
+// #3290 fix r1 (execution review finding 1): a dead focus-progress (crash, garbled output, script
+// missing) used to fall through this block with focuses=[] and ship — the same silently-degraded
+// push class: no focus cards, #4 overwritten with an empty map. The catch now marks focusFail and
+// the push aborts here instead.
+if (focusFail) {
+  console.error(`focus-join-failed: ${focusFail}; aborting before any upsert, state hash unwritten`);
+  process.exit(1);
+}
 if (focuses.length > 0 && stFoci.length === 0) {
   console.error(`focus-join-failed: status-tables gave ${stJson ? 'no focus scalars (focus.foci empty)' : 'no output (run failed or timed out)'} while focus-progress returned ${focuses.length} focus(es); aborting before any upsert, state hash unwritten`);
   process.exit(1);
+}
+// #3290 fix r1 (execution review finding 2): foci.length is a proxy, not the join's outcome. If
+// status-tables returns foci whose names match NONE of focus-progress's names (label/name drift),
+// every card ships with wtdPct null — the incident's exact symptom — so decide on the joined result:
+// abort when focus-progress returned focuses and none of them found its status-tables scalars. A
+// PARTIAL miss (one focus unmatched) stays legal: that one card degrades visibly (null %) while the
+// rest of the board stays truthful; only the total miss is the wholesale-keying-broken incident
+// shape. Names only in the abort line — no ticket text, no paths.
+const fociNames = new Set(stFoci.map((x) => String(x.name ?? '').trim()));
+if (focuses.length > 0 && fociNames.size > 0) {
+  const unmatched = focuses.filter((f) => !fociNames.has(String(f.name ?? '').trim())).map((f) => f.name);
+  if (unmatched.length === focuses.length) {
+    console.error(`focus-join-failed: none of focus-progress's ${focuses.length} focus(es) matched its status-tables scalars (unmatched: ${unmatched.join(', ')}); aborting before any upsert, state hash unwritten`);
+    process.exit(1);
+  }
 }
 const STATE = path.join(os.homedir(), '.claude/board-live/state.json');
 const hash = (await import('node:crypto')).createHash('sha256').update([summary, focusBody, detailBody, JSON.stringify({ generatedAt: snap.generatedAt, details: shelfDetails })].join('\n').split(snap.generatedAt).join('')).digest('hex'); // #3272: the change-skip hash covers the #4 body too

@@ -1,0 +1,224 @@
+{
+  "focuses": [
+    {
+      "key": "cost",
+      "name": "Cost",
+      "label": "Cost",
+      "goal": "fixture goal cost",
+      "lanes": 2,
+      "state": "active",
+      "pausedReason": null,
+      "done": 1,
+      "open": 1,
+      "in_progress": 1,
+      "total": 2,
+      "wtdPct": 50,
+      "unsized": 0
+    }
+  ],
+  "focusTotals": {
+    "done": 1,
+    "open": 1,
+    "total": 2,
+    "active": 1,
+    "paused": 0,
+    "finished": 0
+  },
+  "jevResearch": null,
+  "generatedAt": "2026-10-15T07:12:27.000Z",
+  "counts": {
+    "in_progress": 2,
+    "in_review": 3,
+    "blocked": 1,
+    "todo_work": 1,
+    "parked": 0,
+    "bookkeeping": 0
+  },
+  "rows": [
+    {
+      "id": "9801",
+      "subject": "DEMO merged leg waits for its next leg",
+      "column": "in_progress",
+      "kind": "work",
+      "blockedBy": "",
+      "updatedAt": "2026-10-15T06:04:49.201Z",
+      "state": "waiting-to-merge",
+      "legMerged": true
+    },
+    {
+      "id": "9802",
+      "subject": "DEMO open tail is merging",
+      "column": "in_review",
+      "kind": "work",
+      "blockedBy": "",
+      "updatedAt": "2026-10-15T06:52:27.000Z",
+      "state": "waiting-to-merge"
+    },
+    {
+      "id": "9803",
+      "subject": "DEMO executor running although a review row landed",
+      "column": "in_progress",
+      "kind": "work",
+      "blockedBy": "",
+      "updatedAt": "2026-10-15T07:05:00.000Z",
+      "state": "running"
+    },
+    {
+      "id": "9804",
+      "subject": "DEMO planner running",
+      "column": "in_progress",
+      "kind": "work",
+      "blockedBy": "",
+      "updatedAt": "2026-10-15T07:12:19.272Z",
+      "state": "running"
+    },
+    {
+      "id": "9805",
+      "subject": "DEMO bounced back to executor",
+      "column": "in_progress",
+      "kind": "work",
+      "blockedBy": "",
+      "updatedAt": "2026-10-15T07:07:59.295Z",
+      "state": "failed-back-to"
+    },
+    {
+      "id": "9806",
+      "subject": "DEMO blocked todo no referee state",
+      "column": "todo",
+      "kind": "work",
+      "blockedBy": "9804",
+      "updatedAt": "2026-10-15T05:00:00.000Z",
+      "state": null
+    }
+  ],
+  "shelfRows": [],
+  "seats": [
+    {
+      "role": "planner",
+      "note": "",
+      "where": "Claude",
+      "model": "unknown",
+      "effort": "unknown"
+    },
+    {
+      "role": "plan-review",
+      "note": "",
+      "where": "Claude",
+      "model": "unknown",
+      "effort": "unknown"
+    },
+    {
+      "role": "executor",
+      "note": "",
+      "where": "Claude",
+      "model": "unknown",
+      "effort": "unknown"
+    },
+    {
+      "role": "execution-review",
+      "note": "",
+      "where": "Claude",
+      "model": "unknown",
+      "effort": "unknown"
+    },
+    {
+      "role": "ship-tail",
+      "note": "",
+      "where": "Claude",
+      "model": "unknown",
+      "effort": "unknown"
+    },
+    {
+      "role": "research",
+      "note": "",
+      "where": "Claude",
+      "model": "unknown",
+      "effort": "unknown"
+    }
+  ],
+  "lanes": [
+    {
+      "id": "9803",
+      "subject": "DEMO executor running although a review row landed",
+      "blockedBy": "",
+      "column": "in_progress",
+      "live": true,
+      "stage": "executor running",
+      "seat": "executor",
+      "model": "fable",
+      "effort": "high",
+      "state": "running",
+      "since": "2026-10-15T07:05:00.000Z",
+      "jev": null
+    },
+    {
+      "id": "9804",
+      "subject": "DEMO planner running",
+      "blockedBy": "",
+      "column": "in_progress",
+      "live": true,
+      "stage": "planner running",
+      "seat": "planner",
+      "model": "unavailable (no planner ledger row)",
+      "effort": "unavailable (no planner ledger row)",
+      "state": "running",
+      "since": "2026-10-15T07:12:19.272Z",
+      "jev": null
+    },
+    {
+      "id": "9805",
+      "subject": "DEMO bounced back to executor",
+      "blockedBy": "",
+      "column": "in_progress",
+      "live": true,
+      "stage": "execution-review said NEEDS-WORK → fix round",
+      "seat": "executor",
+      "model": "opus",
+      "effort": "medium",
+      "state": "failed-back-to",
+      "since": "2026-10-15T07:07:59.295Z",
+      "jev": null
+    }
+  ],
+  "shipTail": [
+    {
+      "id": "9802",
+      "subject": "DEMO open tail is merging",
+      "blockedBy": "",
+      "column": "in_review",
+      "live": false,
+      "stage": "ship-tail open — waiting-to-merge",
+      "seat": "ship-tail",
+      "model": "haiku",
+      "effort": "low",
+      "state": "waiting-to-merge",
+      "since": "2026-10-15T06:52:27.000Z",
+      "jev": null
+    }
+  ],
+  "laneCounts": {
+    "work": 3,
+    "workCap": 4,
+    "shipTail": 1,
+    "shipTailCap": 2
+  },
+  "laneCap": 4,
+  "jev": {
+    "fileHint": {
+      "rows": 0,
+      "ok": 0,
+      "target": 100,
+      "agreeTop1": 0,
+      "last": null
+    },
+    "lessonMerge": {
+      "rows": 0,
+      "scored": 0,
+      "agree": 0,
+      "target": 400,
+      "last": null
+    }
+  },
+  "shelf": {},
+  "laneSource": "lane-state"
+}

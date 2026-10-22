@@ -1,0 +1,17 @@
+{
+  "note": "#3111 leg 2b synthetic reader payload: the shape ai-brain's `hooks/lane-state.mjs --json` prints (per-ticket state/step/holdsSlot/tailOpen/since), authored synthetic for the seam arm — never captured from a live run. 9801 is the D4 merged-leg shape (waiting-to-merge, tail closed); 9802 the open tail; 9806 deliberately absent (no reader state — the board column must pass through).",
+  "session": "fx-board-live-referee",
+  "now": "2026-10-15T07:12:27.000Z",
+  "cap": 4,
+  "bounds": { "openStepMs": 21600000, "betweenStepMs": 5400000 },
+  "held": ["9803", "9804", "9805"],
+  "free": 1,
+  "over": 0,
+  "tickets": {
+    "9801": { "state": "waiting-to-merge", "step": "ship-tail", "holdsSlot": false, "who": { "where": "claude", "model": null }, "since": "2026-10-15T06:04:49.201Z", "source": "events", "tailOpen": false, "danglingBlockers": [] },
+    "9802": { "state": "waiting-to-merge", "step": "ship-tail", "holdsSlot": false, "who": { "where": "claude", "model": "haiku" }, "since": "2026-10-15T06:52:27.000Z", "source": "ledger-fallback", "tailOpen": true, "danglingBlockers": [] },
+    "9803": { "state": "running", "step": "executor", "holdsSlot": true, "who": { "where": "claude", "model": null }, "since": "2026-10-15T07:05:00.000Z", "source": "events", "danglingBlockers": [] },
+    "9804": { "state": "running", "step": "planner", "holdsSlot": true, "who": { "where": "zai", "model": null }, "since": "2026-10-15T07:12:19.272Z", "source": "events", "danglingBlockers": [] },
+    "9805": { "state": "failed-back-to", "step": "executor", "holdsSlot": true, "who": { "where": "claude", "model": null }, "since": "2026-10-15T07:07:59.295Z", "source": "events", "danglingBlockers": [] }
+  }
+}

@@ -89,10 +89,20 @@ if "$TMPBIN/gh" issue create -R ziyilam3999/agent-board-data --body-file /dev/nu
 "$TMPBIN/gh" issue edit 9 -R ziyilam3999/agent-board-data --bogus x 2>"$SBX/gh-err.txt" >/dev/null || command grep -q "^gh: " "$SBX/gh-err.txt" || fail "gh stub stderr is not real-style (no gh: line)"
 rm -f "$B"
 
-# --- synthetic ai-brain checkout: the status-tables stub is both the imported module (lastLedgerRow /
-# ROLE_ORDER) and the child process board-live-push spawns; ST_MODE picks the flavour per arm.
+# --- synthetic ai-brain checkout: the status-tables stub is the child process board-live-push
+# spawns for the referee payload (#3111 leg 2b: the lastLedgerRow/ROLE_ORDER import is gone — the
+# stub keeps exporting them for a base-script run), plus a stub lane-state reader for the
+# per-ticket-state half of the referee; ST_MODE picks the flavour per arm.
 # drift = foci whose names match NONE of focus-progress's (the wholesale keying-broken shape);
 # ws = the same names as ok but padded with surrounding whitespace (must still join).
+mkdir -p "$AB/hooks"
+cat >"$AB/hooks/lane-state.mjs" <<'RD'
+process.stdout.write(JSON.stringify({
+  session: '00000000-0000-4000-8000-000000000329', now: '2026-10-15T07:12:27.000Z', cap: 4,
+  held: ['7001'], free: 3, over: 0,
+  tickets: { 7001: { state: 'running', step: 'executor', holdsSlot: true, who: { where: 'claude', model: 'fable' }, since: '2026-10-15T07:05:00.000Z', source: 'events', danglingBlockers: [] } },
+}));
+RD
 cat >"$AB/skills/progress-summary/bin/status-tables.mjs" <<'ST'
 import { pathToFileURL } from 'node:url';
 export const ROLE_ORDER = ['research', 'planner', 'plan-review', 'executor', 'execution-review', 'ship-tail'];
@@ -112,9 +122,9 @@ const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv
 if (isMain) {
   const mode = process.env.ST_MODE || 'ok';
   if (mode === 'fail') { console.error('stub status-tables: boom'); process.exit(3); }
-  if (mode === 'hang') { setTimeout(() => {}, 30000); } // killed by execFileSync's 20 s timeout -> run() swallows
+  if (mode === 'hang') { setTimeout(() => {}, 30000); } // killed by execFileSync's 20 s timeout -> the referee abort fires
   else process.stdout.write(JSON.stringify({
-    lanes: { rows: [{ id: '7001', pool: 'work', stage: 'executor running', seat: 'fable (Agent tool)', effort: 'high (assigned)', model: 'fable' }] },
+    lanes: { work: { n: 1, ceiling: 4 }, ship_tail: { n: 0, ceiling: 2 }, rows: [{ id: '7001', pool: 'work', stage: 'executor running', seat: 'fable (Agent tool)', effort: 'high (assigned)', model: 'fable' }] },
     focus: { foci: MODES[mode] ?? MODES.ok },
   }));
 }
@@ -137,12 +147,14 @@ else {
   process.stdout.write(JSON.stringify(focuses));
 }
 FF
-# --- frozen board fixture (DEMO ids only) + a quiet kanban selector state (no tsx spawn)
+# --- frozen board fixture (DEMO ids only)
 cat >"$DATA/board.json" <<'BOARD'
 { "generatedAt": "2026-10-15T07:00:00Z", "rows": [
   { "id": 7001, "title": "DEMO lane one", "column": "in_progress", "updatedAt": "2026-10-15T06:00:00Z" },
   { "id": 7002, "title": "DEMO todo one", "column": "todo", "updatedAt": "2026-10-15T06:30:00Z" } ] }
 BOARD
+# quiet selector state for the BASE_MJS equivalence arm only (a base script still has the
+# --kanban-json seam; the head script reads it nowhere)
 printf '{ "active": [], "lanes": [], "shelf": {} }' >"$DATA/kanban.json"
 
 # run_push <st_mode> <ff_mode> [extra flags...] — a FULL push (no --dry-run) against the sandbox.
@@ -152,22 +164,24 @@ run_push() {
   : >"$GH_LOG"; mkdir -p "$TMPHOME/.claude/board-live"; rm -f "$TMPHOME/.claude/board-live/state.json"
   HOME="$TMPHOME" ST_MODE="$st" FF_MODE="$ff" BOARD_AI_BRAIN="$AB" \
     PATH="$TMPBIN:/usr/bin:/bin" node "$SCRIPT" --board "$DATA/board.json" --focus-dir "${FF_DIR:-$FD}" \
-    --kanban-json "$DATA/kanban.json" --session "$SID" --ledger-dir "$DATA/empty" --events-dir "$DATA/empty" \
+    --session "$SID" --ledger-dir "$DATA/empty" --events-dir "$DATA/empty" \
     --tasks-dir "$DATA/empty" --now "$NOW" "$@"
 }
 upserts() { [ -f "$GH_LOG" ] && wc -l <"$GH_LOG" | tr -d ' ' || echo 0; }
 
 # --- must-fire arms: the dead join aborts the push (non-zero exit, named stderr line, zero upserts,
 # no state hash). The 20 s budget is the script's own execFileSync timeout killing the hung stub.
+# #3111 leg 2b: a dead status-tables stub now trips the LANE-REFEREE abort first (same class: a dead
+# input aborts before the first upsert) — both named lines are accepted, the grep stays strict.
 must_fire() {
   local name="$1" st="$2" ff="$3" out err rc
   out="$(mktemp)"; err="$(mktemp)"
   run_push "$st" "$ff" >"$out" 2>"$err"; rc=$?
   [ "$rc" -ne 0 ] || fail "$name: exited 0 (the hollow push shipped)"
-  command grep -q 'focus-join-failed:' "$err" || fail "$name: no named failure line on stderr"
+  command grep -q 'focus-join-failed:\|lane-referee-failed:' "$err" || fail "$name: no named failure line on stderr"
   [ "$(upserts)" = "0" ] || fail "$name: $(upserts) upsert(s) happened"
   [ ! -e "$TMPHOME/.claude/board-live/state.json" ] || fail "$name: state hash was written"
-  echo "ok must-fire $name (rc=$rc: $(command grep -m1 'focus-join-failed:' "$err"))"
+  echo "ok must-fire $name (rc=$rc: $(command grep -m1 'focus-join-failed:\|lane-referee-failed:' "$err"))"
   rm -f "$out" "$err"
 }
 # inner status-tables dead while focus-progress is healthy
@@ -212,24 +226,20 @@ PEOF
 rm -f "$OUT_P"
 echo "ok must-not-fire single-focus-missing-scalars (wtdPct passes through as null)"
 
-# --- healthy equivalence: the #4 body and the dry-run summary are byte-for-byte what the base script
-# produces from the same fixtures (a healthy run is unchanged).
+# --- healthy equivalence: the #4 body is byte-for-byte what the base script produces from the same
+# fixtures (a healthy focus surface is unchanged). #3111 leg 2b: the dry-run summary is INTENTIONALLY
+# different from a base script (lanes/shipTail/laneCounts/laneSource are the referee's now), so the
+# summary comparison was dropped with the lane rewrite; the #4 body has no lane facts in it.
 if [ -n "${BASE_MJS:-}" ]; then
-  BODY_H="$(mktemp)"; BODY_B="$(mktemp)"; DRY_H="$(mktemp)"; DRY_B="$(mktemp)"
+  BODY_H="$(mktemp)"; BODY_B="$(mktemp)"
   run_push ok ok --focus-body >"$BODY_H" 2>/dev/null || fail "healthy --focus-body (head) exited nonzero"
   HOME="$TMPHOME" ST_MODE=ok FF_MODE=ok BOARD_AI_BRAIN="$AB" PATH="$TMPBIN:/usr/bin:/bin" \
     node "$BASE_MJS" --board "$DATA/board.json" --focus-dir "$FD" --kanban-json "$DATA/kanban.json" \
     --session "$SID" --ledger-dir "$DATA/empty" --events-dir "$DATA/empty" --tasks-dir "$DATA/empty" \
     --now "$NOW" --focus-body >"$BODY_B" 2>/dev/null || fail "healthy --focus-body (base) exited nonzero"
   cmp -s "$BODY_H" "$BODY_B" || fail "healthy #4 body differs from base"
-  run_push ok ok --dry-run --json >"$DRY_H" 2>/dev/null || fail "healthy --dry-run (head) exited nonzero"
-  HOME="$TMPHOME" ST_MODE=ok FF_MODE=ok BOARD_AI_BRAIN="$AB" PATH="$TMPBIN:/usr/bin:/bin" \
-    node "$BASE_MJS" --board "$DATA/board.json" --focus-dir "$FD" --kanban-json "$DATA/kanban.json" \
-    --session "$SID" --ledger-dir "$DATA/empty" --events-dir "$DATA/empty" --tasks-dir "$DATA/empty" \
-    --now "$NOW" --dry-run --json >"$DRY_B" 2>/dev/null || fail "healthy --dry-run (base) exited nonzero"
-  cmp -s "$DRY_H" "$DRY_B" || fail "healthy dry-run summary differs from base"
-  rm -f "$BODY_H" "$BODY_B" "$DRY_H" "$DRY_B"
-  echo "ok healthy-equivalence (#4 body + dry-run summary byte-identical to base)"
+  rm -f "$BODY_H" "$BODY_B"
+  echo "ok healthy-equivalence (#4 body byte-identical to base)"
 else
   echo "skip healthy-equivalence (BASE_MJS unset)"
 fi

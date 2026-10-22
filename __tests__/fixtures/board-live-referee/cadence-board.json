@@ -1,0 +1,9 @@
+{
+  "generatedAt": "2026-10-15T07:12:27Z",
+  "note": "#3111 leg 2b synthetic cadence board row set (the plan's Fixture B shapes, ids 9303-9305, authored from the plan's stated facts — never copied from the live store): pairs with ai-brain's committed tests/fixtures/board-truth/cadence ledger+tasks through the run-time seam (AC20).",
+  "rows": [
+    { "id": "9303", "title": "DEMO cadence merged leg", "column": "in_review", "updatedAt": "2026-10-15T06:52:27.000Z" },
+    { "id": "9304", "title": "DEMO cadence next leg after a merged leg", "column": "in_progress", "updatedAt": "2026-10-15T07:02:27.000Z" },
+    { "id": "9305", "title": "DEMO cadence same-ticket respawn", "column": "in_progress", "updatedAt": "2026-10-15T07:02:27.000Z" }
+  ]
+}

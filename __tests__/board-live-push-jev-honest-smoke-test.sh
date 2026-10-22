@@ -19,7 +19,7 @@ FX="$AB/tests/fixtures/board-truth"
 # gh must be absent from PATH: a dry run touches no network.
 TMPBIN="$(mktemp -d)"
 JFX="$(mktemp -d)"
-trap 'rm -rf "$TMPBIN" "$JFX"' EXIT
+trap 'rm -rf "$TMPBIN" "$JFX" "$TAB1" "$TAB2"' EXIT
 ln -s "$(command -v node)" "$TMPBIN/node"
 ln -s "$(command -v git)" "$TMPBIN/git"
 export PATH="$TMPBIN:/usr/bin:/bin"
@@ -65,16 +65,56 @@ const fhMixed = []; { const p = mk();
 }
 // v2only (MF5): only 3031-v2 rows, 120 judged+labelled (past v2's n_min 100); zero current-version rows
 const fhV2 = []; { const p = mk(); for (let i = 0; i < 120; i++) p(fhV2, { task: '9904', role: 'planner', prereg_version: '3031-v2', jev_status: 'ok', label: 'ok', label_src: 'labeller', jev_top3: T3, haiku_top3: T3 }); }
+// fix1 (execution-review finding 2) version-rule arms, run against SYNTHETIC prereg overlays below:
+// v4pre: a committed 3390-v4 prereg supersedes 3164-v3 (n_min 90) at ZERO v4 rows, 7 superseded v3 rows
+const fhV4pre = []; { const p = mk(); for (let i = 0; i < 7; i++) p(fhV4pre, { task: '9910', role: 'planner', prereg_version: '3164-v3', jev_status: 'ok', label: 'ok', label_src: 'labeller', jev_top3: T3, haiku_top3: T3 }); }
+// v4rows: the same plus 3 v4 rows (2 judged+labelled agreeing, 1 day-cap)
+const fhV4rows = fhV4pre.slice(); { const p = mk();
+  for (let i = 0; i < 2; i++) p(fhV4rows, { task: '9911', role: 'planner', prereg_version: '3390-v4', jev_status: 'ok', label: 'ok', label_src: 'labeller', jev_top3: T3, haiku_top3: T3 });
+  p(fhV4rows, { task: '9912', role: 'planner', prereg_version: '3390-v4', jev_status: 'cap' });
+}
+// noprereg: rows tagged 3164-v3 with NO committed 3164 prereg (overlay omits its dir): rows never hide
+const fhNoprereg = []; { const p = mk();
+  for (let i = 0; i < 3; i++) p(fhNoprereg, { task: '9913', role: 'planner', prereg_version: '3164-v3', jev_status: 'ok', label: 'ok', label_src: 'labeller', jev_top3: T3, haiku_top3: T3 });
+  p(fhNoprereg, { task: '9914', role: 'planner', prereg_version: '3164-v3', jev_status: 'cap' });
+  p(fhNoprereg, { task: '9915', role: 'planner', prereg_version: '3164-v3', jev_status: 'no_anchor' });
+}
 // alllabelled (MNF1)
 const lmAll = []; { const p = mk(); for (let i = 0; i < 30; i++) p(lmAll, { jev_status: 'ok', label: 'duplicate', label_src: 'labeller', jev_pick: 'dup', base_pick: 'dup' }); }
 const fhAll = []; { const p = mk(); for (let i = 0; i < 5; i++) p(fhAll, { task: '9905', role: 'planner', prereg_version: '3164-v3', jev_status: 'ok', label: 'ok', label_src: 'mechanical', jev_top3: T3, haiku_top3: T3 }); }
 // capped (INPUT-BOUND): TRIAL_ROW_CAP+2 physical lines, both logs
 const lmCapped = []; { const p = mk(); for (let i = 0; i < 20002; i++) p(lmCapped, { jev_status: 'ok', label: 'ok', label_src: 'labeller', jev_pick: 'dup', base_pick: 'dup' }); }
 const fhCapped = []; { const p = mk(); for (let i = 0; i < 20002; i++) p(fhCapped, { prereg_version: '3164-v3', jev_status: 'ok', label: 'ok', label_src: 'labeller', jev_top3: T3, haiku_top3: T3 }); }
-for (const [name, lm, fh] of [['mixed', lmMixed, fhMixed], ['v2only', lmMixed, fhV2], ['alllabelled', lmAll, fhAll], ['empty', [], []], ['capped', lmCapped, fhCapped]]) {
+for (const [name, lm, fh] of [['mixed', lmMixed, fhMixed], ['v2only', lmMixed, fhV2], ['alllabelled', lmAll, fhAll], ['empty', [], []], ['capped', lmCapped, fhCapped], ['v4pre', [], fhV4pre], ['v4rows', [], fhV4rows], ['noprereg', [], fhNoprereg]]) {
   const d = path.join(root, name); fs.mkdirSync(d, { recursive: true });
   writeLm(d, lm); writeFh(d, fh); writeResearch(d);
 }
+BUILDEOF
+
+# --- fix1 synthetic PREREG overlays: throwaway BOARD_AI_BRAIN roots holding only skills (symlinked,
+# the feed imports status-tables from it) and synthetic .ai-workspace/trials preregistrations. The
+# committed numbers here are invented; no real prereg or row is copied.
+TAB1="$(mktemp -d)"; TAB2="$(mktemp -d)"
+for T in "$TAB1" "$TAB2"; do
+  mkdir -p "$T/.ai-workspace/trials" "$T/tests/fixtures"
+  ln -s "$AB/skills" "$T/skills"
+  ln -s "$AB/tests/fixtures/board-truth" "$T/tests/fixtures/board-truth"
+done
+node - "$TAB1" "$TAB2" <<'BUILDEOF' || fail "prereg overlay build failed"
+const fs = require('fs'); const path = require('path');
+const write = (root, dir, j) => { const d = path.join(root, '.ai-workspace/trials', dir); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'preregistration.json'), JSON.stringify(j)); };
+const root1 = process.argv[2], root2 = process.argv[3];
+const V1 = { ticket: 2907, n_min: 20, frozen_at: '2026-10-04' }; // legacy: no prereg_version (dir map resolves it)
+const V2 = { ticket: 3031, supersedes: 2907, n_min: 100, frozen_at: '2026-10-08' }; // legacy; supersedes as a number, like the real one
+const V3 = { ticket: 3164, supersedes: '3031-v2', prereg_version: '3164-v3', design: { n_min: 100 }, frozen_at: '2026-10-16' }; // n_min under design, like the real one
+const V4 = { ticket: 3390, supersedes: '3164-v3', prereg_version: '3390-v4', n_min: 90, frozen_at: '2026-10-19' };
+for (const root of [root1, root2]) {
+  write(root, '2907-jev-file-hint-shadow', V1);
+  write(root, '3031-jev-2907-shadow-v2', V2);
+}
+write(root1, '3164-jev-file-hint-v3', V3);
+write(root1, '3390-jev-file-hint-v4', V4);
+// root2 (noprereg arm): NO 3164 prereg — rows tagged 3164-v3 must still count
 BUILDEOF
 
 run() {
@@ -82,20 +122,31 @@ run() {
     --ledger-dir "$FX/ledger" --events-dir "$FX/ledger" --tasks-dir "$FX/tasks" \
     --now "$NOW" --jev-dir "$JFX/$1" --dry-run --json
 }
+# fix1 version-rule runs: the same feed over the same fixture board, but BOARD_AI_BRAIN redirected to
+# the synthetic prereg overlays (the version rule must read the COMMITTED preregs, not a hardcoded list)
+runab() {
+  BOARD_AI_BRAIN="$2" node "$SCRIPT" --board "$FX/board.json" --session "$SID" \
+    --ledger-dir "$FX/ledger" --events-dir "$FX/ledger" --tasks-dir "$FX/tasks" \
+    --now "$NOW" --jev-dir "$JFX/$1" --dry-run --json
+}
 OUT_MIXED="$(mktemp)"; OUT_V2="$(mktemp)"; OUT_ALL="$(mktemp)"; OUT_EMPTY="$(mktemp)"; OUT_CAP="$(mktemp)"
+OUT_V4P="$(mktemp)"; OUT_V4R="$(mktemp)"; OUT_NP="$(mktemp)"
 run mixed >"$OUT_MIXED" 2>/dev/null || fail "mixed run exited nonzero"
 run v2only >"$OUT_V2" 2>/dev/null || fail "v2only run exited nonzero"
 run alllabelled >"$OUT_ALL" 2>/dev/null || fail "alllabelled run exited nonzero"
 run empty >"$OUT_EMPTY" 2>/dev/null || fail "empty run exited nonzero"
 run capped >"$OUT_CAP" 2>/dev/null || fail "capped run exited nonzero"
+runab v4pre "$TAB1" >"$OUT_V4P" 2>/dev/null || fail "v4pre run exited nonzero"
+runab v4rows "$TAB1" >"$OUT_V4R" 2>/dev/null || fail "v4rows run exited nonzero"
+runab noprereg "$TAB2" >"$OUT_NP" 2>/dev/null || fail "noprereg run exited nonzero"
 
-node - "$OUT_MIXED" "$OUT_V2" "$OUT_ALL" "$OUT_EMPTY" "$OUT_CAP" <<'EOF' || exit 1
+node - "$OUT_MIXED" "$OUT_V2" "$OUT_ALL" "$OUT_EMPTY" "$OUT_CAP" "$OUT_V4P" "$OUT_V4R" "$OUT_NP" <<'EOF' || exit 1
 const fs = require('fs');
-const [mixedS, v2S, allS, emptyS, capS] = process.argv.slice(2).map((p) => fs.readFileSync(p, 'utf8'));
+const [mixedS, v2S, allS, emptyS, capS, v4pS, v4rS, npS] = process.argv.slice(2).map((p) => fs.readFileSync(p, 'utf8'));
 const bad = [];
 const chk = (name, ok) => { if (!ok) bad.push(name); };
-let mixed, v2, all, empty, cap;
-for (const [s, n, o] of [[mixedS, 'mixed', (x) => mixed = x], [v2S, 'v2only', (x) => v2 = x], [allS, 'alllabelled', (x) => all = x], [emptyS, 'empty', (x) => empty = x], [capS, 'capped', (x) => cap = x]]) {
+let mixed, v2, all, empty, cap, v4p, v4r, np;
+for (const [s, n, o] of [[mixedS, 'mixed', (x) => mixed = x], [v2S, 'v2only', (x) => v2 = x], [allS, 'alllabelled', (x) => all = x], [emptyS, 'empty', (x) => empty = x], [capS, 'capped', (x) => cap = x], [v4pS, 'v4pre', (x) => v4p = x], [v4rS, 'v4rows', (x) => v4r = x], [npS, 'noprereg', (x) => np = x]]) {
   try { o(JSON.parse(s)); } catch { console.error('FAIL: ' + n + ' output is not one JSON object'); process.exit(1); }
 }
 const lm = mixed.jev.lessonMerge, fh = mixed.jev.fileHint, rs = mixed.jevResearch.shadows;
@@ -145,10 +196,22 @@ chk('MNF2 empty fileHint version still resolved + quiet', empty.jev.fileHint.ver
 // INPUT-BOUND: past the row cap the trial fails closed — no numbers at all
 chk('INPUT-BOUND capped lessonMerge counts null + cap state', cap.jev.lessonMerge.labelled === null && /cap/.test(cap.jev.lessonMerge.state) && cap.jev.lessonMerge.judged === null);
 chk('INPUT-BOUND capped fileHint counts null', cap.jev.fileHint.labelled === null && /cap/.test(cap.jev.fileHint.state));
+// fix1 version rule (execution-review finding 2): committed preregs decide, rows never hide
+const v4pEnd = Object.fromEntries((v4p.jev.fileHint.ended || []).map((e) => [e.version, e.state]));
+chk('fix1 v4pre: the newer committed prereg is current at its own zero state', v4p.jev.fileHint.version === '3390-v4' && v4p.jev.fileHint.nMin === 90 && v4p.jev.fileHint.labelled === 0 && v4p.jev.fileHint.state === 'no rows yet');
+chk('fix1 v4pre: the superseded 3164-v3 renders ended, never a live bar', v4pEnd['3164-v3'] === 'superseded' && v4pEnd['3031-v2'] === 'ended INCONCLUSIVE (#3080)');
+chk('fix1 v4pre: superseded v3 rows never move the current counters', v4p.jev.fileHint.judged === 0 && v4p.jev.fileHint.bothAnswered === 0);
+chk('fix1 v4rows: v4 rows count toward the COMMITTED v4 n_min', v4r.jev.fileHint.version === '3390-v4' && v4r.jev.fileHint.nMin === 90 && v4r.jev.fileHint.labelled === 2 && v4r.jev.fileHint.judged === 2 && v4r.jev.fileHint.bothAnswered === 2 && v4r.jev.fileHint.agreeTop1 === 2);
+chk('fix1 v4rows: 3164-v3 stays in the ended list', Object.fromEntries(v4r.jev.fileHint.ended.map((e) => [e.version, e.state]))['3164-v3'] === 'superseded');
+chk('fix1 v4rows: the research tag id follows the CURRENT version prereg', v4r.jevResearch.shadows[1].id === '3390');
+chk('fix1 noprereg: rows of a version with no committed prereg still count', np.jev.fileHint.version === '3164-v3' && np.jev.fileHint.labelled === 3 && np.jev.fileHint.judged === 3 && np.jev.fileHint.nMin === null);
+chk('fix1 noprereg: the state names it an unregistered version', np.jev.fileHint.state === 'unregistered version');
+chk('fix1 noprereg: the older family still renders ended', Object.fromEntries(np.jev.fileHint.ended.map((e) => [e.version, e.state]))['3031-v2'] === 'ended INCONCLUSIVE (#3080)');
+chk('fix1 noprereg: no prereg to tag, the research card carries no id', np.jevResearch.shadows[1].id == null);
 if (bad.length) { console.error('FAIL: ' + bad.join('; ')); process.exit(1); }
-console.log('jev-honest smoke: 38 arms OK (MF1-5, MNF1/2/4, privacy, input bound)');
+console.log('jev-honest smoke: 49 arms OK (MF1-5, MNF1/2/4, privacy, input bound, fix1 version rule)');
 EOF
 RC=$?
-rm -f "$OUT_MIXED" "$OUT_V2" "$OUT_ALL" "$OUT_EMPTY" "$OUT_CAP"
+rm -f "$OUT_MIXED" "$OUT_V2" "$OUT_ALL" "$OUT_EMPTY" "$OUT_CAP" "$OUT_V4P" "$OUT_V4R" "$OUT_NP"
 [ "$RC" -eq 0 ] || fail "jev-honest arms failed (rc=$RC)"
 echo "jev-honest smoke: PASS"

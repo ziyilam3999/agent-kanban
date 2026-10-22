@@ -402,6 +402,20 @@ function upsertIssue(title, text) {
   console.log(`issue #${n} ${title} bytes=${text.length}`);
 }
 if (DRY) { process.stdout.write(JSON.stringify(JSON.parse(summary)) + '\n'); process.exit(0); }
+// #3290: fail-loud focus join. The card scalars (wtdPct) and every per-ticket step fact come ONLY from
+// the inner status-tables run, whose failure `run`'s empty catch used to swallow: the push still shipped
+// with counts from focus-progress, % null and steps blank — the 2026-10-19 incident, shipped silently.
+// status-tables derives focus.foci by spawning the SAME focus script we read FF from, so foci empty while
+// FF is not means that inner run died (crash, throw or timeout — every flavor lands in the same swallow).
+// Abort BEFORE the first upsert with the state hash unwritten: the watchdog's next tick retries and the
+// board keeps the last good bodies (the page's "as of HH:MM" line shows the staleness, not silence).
+// The step-row half (stRow) alone is NOT an abort signal: a board with no running work lanes is a legal
+// quiet board; foci is the one field that separates "dead join" from "nothing running".
+const stFoci = (stJson && stJson.focus && stJson.focus.foci) || [];
+if (focuses.length > 0 && stFoci.length === 0) {
+  console.error(`focus-join-failed: status-tables gave ${stJson ? 'no focus scalars (focus.foci empty)' : 'no output (run failed or timed out)'} while focus-progress returned ${focuses.length} focus(es); aborting before any upsert, state hash unwritten`);
+  process.exit(1);
+}
 const STATE = path.join(os.homedir(), '.claude/board-live/state.json');
 const hash = (await import('node:crypto')).createHash('sha256').update([summary, focusBody, detailBody, JSON.stringify({ generatedAt: snap.generatedAt, details: shelfDetails })].join('\n').split(snap.generatedAt).join('')).digest('hex'); // #3272: the change-skip hash covers the #4 body too
 let prev = {}; try { prev = JSON.parse(fs.readFileSync(STATE, 'utf8')); } catch {}

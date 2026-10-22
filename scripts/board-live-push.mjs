@@ -278,6 +278,12 @@ const mergeLog = trialRows('lesson-merge-shadow/rows.jsonl');
 const merge = mergeLog.rows;
 const both = merge.filter((r) => r.jev_pick != null && r.base_pick != null);
 const isLabelled = (r) => r.label != null && r.label_src != null; // a labeller-UNSURE row carries label:null and never counts
+// #3121 fix1 (execution-review finding 3): the not-judged backlog counts ONLY rows still waiting to be
+// judged — the recorders' re-feed statuses (lesson-merge: below_floor, day_cap; file-hint: cap). Every
+// other non-ok row is terminal — exact_skip (mechanically labelled), privacy_refused, endpoint_refused,
+// no_anchor, empty_shortlist, rejected, non200, transport — and never inflates the backlog number.
+const LM_BACKLOG = new Set(['below_floor', 'day_cap']);
+const FH_BACKLOG = new Set(['cap']);
 const lmJudged = merge.filter((r) => r.jev_status === 'ok');
 const LM_N_MIN = 300; // the committed 2886 lesson-merge prereg n_min (n_target 400 is not the board basis)
 const lmQuiet = (state) => ({ version: '2886', labelled: null, judged: null, notJudged: null, nMin: LM_N_MIN, scored: null, agree: null, last: null, state });
@@ -285,7 +291,7 @@ const lessonMerge = mergeLog.capped ? lmQuiet('row log over the count cap; not c
   version: '2886',
   labelled: lmJudged.filter(isLabelled).length,
   judged: lmJudged.length,
-  notJudged: merge.length - lmJudged.length,
+  notJudged: merge.filter((r) => LM_BACKLOG.has(String(r.jev_status))).length,
   nMin: LM_N_MIN,
   scored: both.length,
   agree: both.filter((r) => r.jev_pick === r.base_pick).length,
@@ -350,7 +356,7 @@ const fileHint = hintLog.capped ? fhQuiet('row log over the count cap; not count
     nMin: (fhCommitted.get(fhVersion) || {}).nMin ?? null,
     labelled: fhJudged.filter(isLabelled).length,
     judged: fhJudged.length,
-    notJudged: fhCur.length - fhJudged.length,
+    notJudged: fhCur.filter((r) => FH_BACKLOG.has(String(r.jev_status))).length,
     agreeTop1: fhBoth.filter((r) => (r.jev_top3 || [])[0] === (r.haiku_top3 || [])[0]).length,
     bothAnswered: fhBoth.length,
     last: fhCur.at(-1)?.ts || null,
@@ -475,16 +481,15 @@ try {
   const subjOf = (id) => { try { return cleanSubj(JSON.parse(fs.readFileSync(path.join(TASKS_DIR, SID || '', id + '.json'), 'utf8')).subject); } catch { return ''; } };
   const liveLog = lines(path.join(JEV, 'live-judgements.jsonl'));
   const today = new Date(NOW_MS).toISOString().slice(0, 10);
-  // #3121 F2: the research note's labelled count is label non-null AND label_src 'labeller' — a
-  // labeller-UNSURE row (label null) is waiting, not labelled.
-  const labellerLabelled = merge.filter((r) => r.label != null && r.label_src === 'labeller').length;
   jevResearch = {
     asOf: R.asOf, rule: R.rule, testRule: R.testRule,
     liveToday: liveLog.filter((r) => String(r.ts || '').startsWith(today)).length, liveTotal: liveLog.length,
     firstLive: R.firstLive, wins: R.wins, loses: R.loses, model: R.model, calibration: R.calibration, costPerCall: R.costPerCall, latency: R.latency,
     road: (R.road || []).map((id) => ({ id: String(id), status: taskStatus(id), subject: subjOf(id) })),
     shadows: [
-      { name: 'Lesson merge', id: '2886', version: '2886', nMin: lessonMerge.nMin, labelled: lessonMerge.labelled, judged: lessonMerge.judged, notJudged: lessonMerge.notJudged, state: lessonMerge.state, ended: [], note: labellerLabelled ? labellerLabelled + ' rows labelled' : 'collected; waiting for the blind labeller' },
+      // fix1 (finding 4): the note is dropped — the progress line already carries the labelled count on
+      // the same basis, and the old note used a different basis (labeller labels only), so the two could disagree.
+      { name: 'Lesson merge', id: '2886', version: '2886', nMin: lessonMerge.nMin, labelled: lessonMerge.labelled, judged: lessonMerge.judged, notJudged: lessonMerge.notJudged, state: lessonMerge.state, ended: [], note: '' },
       // fix1: the tag id follows the CURRENT version's committed prereg (its trial dir prefix); an
       // unregistered version has no prereg to tag, so the page renders no ticket tag for it.
       { name: 'File hints', id: (fhCommitted.get(fileHint.version) || {}).id ?? null, version: fileHint.version, nMin: fileHint.nMin, labelled: fileHint.labelled, judged: fileHint.judged, notJudged: fileHint.notJudged, state: fileHint.state, ended: fileHint.ended, note: (fileHint.judged || 0) ? '' : 'no rows yet' },

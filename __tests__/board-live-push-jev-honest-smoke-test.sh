@@ -43,12 +43,15 @@ const writeLm = (dir, rows) => { fs.mkdirSync(path.join(dir, 'lesson-merge-shado
 const writeFh = (dir, rows) => { fs.mkdirSync(path.join(dir, 'file-hint-shadow'), { recursive: true }); fs.writeFileSync(path.join(dir, 'file-hint-shadow/rows.jsonl'), rows.join('\n') + (rows.length ? '\n' : '')); };
 const writeResearch = (dir) => fs.writeFileSync(path.join(dir, 'board-research.json'), JSON.stringify(research));
 // lesson-merge mixed log (MF1): 12 judged+labelled / 25 judged-unlabelled / 3 labeller-UNSURE / 4 below-floor / 1 day-cap
+// / 1 exact-skip / 1 privacy-refused (fix1: the terminal rows are never judged, so never in the backlog)
 const lmMixed = []; { const p = mk();
   for (let i = 0; i < 12; i++) p(lmMixed, { jev_status: 'ok', label: 'duplicate', label_src: 'labeller', jev_pick: 'dup', base_pick: i < 6 ? 'dup' : 'new' });
   for (let i = 0; i < 25; i++) p(lmMixed, { jev_status: 'ok', label: null, label_src: null, jev_pick: 'new', base_pick: 'new' });
   for (let i = 0; i < 3; i++) p(lmMixed, { jev_status: 'ok', label: null, label_src: 'labeller', jev_pick: 'new', base_pick: 'new' });
   for (let i = 0; i < 4; i++) p(lmMixed, { jev_status: 'below_floor' });
   for (let i = 0; i < 1; i++) p(lmMixed, { jev_status: 'day_cap' });
+  p(lmMixed, { jev_status: 'exact_skip', label: ['demo.md'], label_src: 'mechanical' });
+  p(lmMixed, { jev_status: 'privacy_refused' });
 }
 // file-hint mixed log (MF3): v1 rows carry no prereg_version; v2 both-answered + haiku-unanswered; v3 current
 const fhMixed = []; { const p = mk();
@@ -61,7 +64,8 @@ const fhMixed = []; { const p = mk();
   p(fhMixed, { task: '9440', role: 'planner', prereg_version: '3164-v3', jev_status: 'ok', label: null, label_src: null, jev_top3: T3B, haiku_top3: T3 }); // both, disagree, unlabelled
   p(fhMixed, { task: '9450', role: 'planner', prereg_version: '3164-v3', jev_status: 'ok', label: 'ok', label_src: 'labeller', jev_top3: T3, haiku_top3: null }); // haiku-unanswered
   p(fhMixed, { task: '9460', role: 'planner', prereg_version: '3164-v3', jev_status: 'ok', label: null, label_src: 'labeller', jev_top3: T3, haiku_top3: null }); // UNSURE
-  p(fhMixed, { task: '9470', role: 'planner', prereg_version: '3164-v3', jev_status: 'no_anchor' }); // not judged
+  p(fhMixed, { task: '9470', role: 'planner', prereg_version: '3164-v3', jev_status: 'no_anchor' }); // terminal: never judged, never backlog
+  p(fhMixed, { task: '9471', role: 'planner', prereg_version: '3164-v3', jev_status: 'cap' }); // day-cap: waiting, counts in the backlog
 }
 // v2only (MF5): only 3031-v2 rows, 120 judged+labelled (past v2's n_min 100); zero current-version rows
 const fhV2 = []; { const p = mk(); for (let i = 0; i < 120; i++) p(fhV2, { task: '9904', role: 'planner', prereg_version: '3031-v2', jev_status: 'ok', label: 'ok', label_src: 'labeller', jev_top3: T3, haiku_top3: T3 }); }
@@ -155,15 +159,15 @@ chk('MF1 lessonMerge.labelled == 12', lm.labelled === 12);
 chk('MF1 lessonMerge.judged == 40 (UNSURE counts as judged)', lm.judged === 40);
 chk('MF1 lessonMerge.nMin == 300', lm.nMin === 300);
 chk('MF1 lessonMerge rows never appear as a progress number', !('rows' in lm) && lm.labelled !== 45 && lm.labelled !== 40);
-// MF2: the not-judged backlog is its own number
-chk('MF2 lessonMerge.notJudged == 5', lm.notJudged === 5);
+// MF2: the not-judged backlog is its own number — and counts ONLY rows still waiting to be judged
+chk('MF2 lessonMerge.notJudged == 5 (below-floor + day-cap; exact_skip/refused are terminal)', lm.notJudged === 5);
 // MF3: current version by the rule; both-answered denominator only
 chk('MF3 fileHint.version == 3164-v3', fh.version === '3164-v3');
 chk('MF3 fileHint.nMin == 100', fh.nMin === 100);
 chk('MF3 fileHint.bothAnswered == 4 (v1/v2/haiku-unanswered excluded)', fh.bothAnswered === 4);
 chk('MF3 fileHint.agreeTop1 == 3', fh.agreeTop1 === 3);
 chk('MF3 fileHint.labelled == 4 (mechanical label counts)', fh.labelled === 4);
-chk('MF3 fileHint.judged == 6 / notJudged == 1', fh.judged === 6 && fh.notJudged === 1);
+chk('MF3 fileHint.judged == 6 / notJudged == 1 (day-cap only; no_anchor is terminal)', fh.judged === 6 && fh.notJudged === 1);
 // superseded/concluded render, never progress
 const endV = Object.fromEntries((fh.ended || []).map((e) => [e.version, e.state]));
 chk('ended 3031-v2 == ended INCONCLUSIVE (#3080)', endV['3031-v2'] === 'ended INCONCLUSIVE (#3080)');
@@ -178,7 +182,7 @@ const lane = (mixed.lanes || []).find((l) => String(l.id) === '9410');
 chk('MNF4 lane 9410 keeps its jev pick payload', !!(lane && lane.jev && lane.jev.role === 'planner' && Array.isArray(lane.jev.top3) && lane.jev.top3.length === 3));
 // research strip: same honest basis + the F2 labelled definition
 chk('research lesson-merge labelled == 12 over nMin 300', rs[0].labelled === 12 && rs[0].nMin === 300 && rs[0].judged === 40 && rs[0].notJudged === 5);
-chk('research lesson-merge note == 12 rows labelled (UNSURE not counted)', rs[0].note === '12 rows labelled');
+chk('research lesson-merge note dropped (the progress line already carries the labelled count)', rs[0].note === '');
 chk('research file-hints version/nMin/labelled', rs[1].version === '3164-v3' && rs[1].nMin === 100 && rs[1].labelled === 4 && rs[1].judged === 6);
 chk('research file-hints carries the ended list', Object.fromEntries(rs[1].ended.map((e) => [e.version, e.state]))['3031-v2'] === 'ended INCONCLUSIVE (#3080)');
 // MF5: superseded-only log — current version at 0/n_min quiet, ended line, no completion basis
@@ -208,8 +212,9 @@ chk('fix1 noprereg: rows of a version with no committed prereg still count', np.
 chk('fix1 noprereg: the state names it an unregistered version', np.jev.fileHint.state === 'unregistered version');
 chk('fix1 noprereg: the older family still renders ended', Object.fromEntries(np.jev.fileHint.ended.map((e) => [e.version, e.state]))['3031-v2'] === 'ended INCONCLUSIVE (#3080)');
 chk('fix1 noprereg: no prereg to tag, the research card carries no id', np.jevResearch.shadows[1].id == null);
+chk('fix1 noprereg: notJudged == 1 (day-cap only; no_anchor is terminal)', np.jev.fileHint.notJudged === 1);
 if (bad.length) { console.error('FAIL: ' + bad.join('; ')); process.exit(1); }
-console.log('jev-honest smoke: 49 arms OK (MF1-5, MNF1/2/4, privacy, input bound, fix1 version rule)');
+console.log('jev-honest smoke: 44 arms OK (MF1-5, MNF1/2/4, privacy, input bound, fix1 version rule + backlog basis)');
 EOF
 RC=$?
 rm -f "$OUT_MIXED" "$OUT_V2" "$OUT_ALL" "$OUT_EMPTY" "$OUT_CAP" "$OUT_V4P" "$OUT_V4R" "$OUT_NP"

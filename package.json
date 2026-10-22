@@ -14,7 +14,8 @@
     "kanban:upload": "tsx scripts/upload-board.ts",
     "kanban:sync": "tsx scripts/export-board.ts && tsx scripts/upload-board.ts",
     "kanban:watchdog": "tsx scripts/board-freshness-watchdog.ts",
-    "test:board-live-push-parity": "bash __tests__/board-live-push-parity-smoke-test.sh"
+    "test:board-live-push-parity": "bash __tests__/board-live-push-parity-smoke-test.sh",
+    "test:board-live-push-failloud": "bash __tests__/board-live-push-failloud-test.sh"
   },
   "dependencies": {
     "@vercel/blob": "^2.4.1",

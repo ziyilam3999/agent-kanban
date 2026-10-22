@@ -307,24 +307,31 @@ const lessonMerge = mergeLog.capped ? lmQuiet('row log over the count cap; not c
 // for outranks the committed set (rows never lag an active trial) and renders as an UNREGISTERED version
 // with its rows counted — a missing prereg never hides real rows; a committed supersedes retires that
 // version however many rows it holds. Only the ended-verdict text stays a static map keyed by version: no
-// committed machine-readable field carries it. INPUT-BOUND (fix2 R2-3): the cap bounds the FILES READ,
-// not just the trusted set — the trials dir is listed once and, at FH_PREREG_CAP entries or fewer, at
-// most that many preregistration files are read; past the cap NO file is read and none are trusted
-// (every rows-log version renders unregistered) — fail closed, never a hidden row.
+// committed machine-readable field carries it. INPUT-BOUND (fix3 R3-1): the cap bounds PREREGISTRATIONS
+// ONLY, never trial dirs — an entry with no preregistration.json is not counted, so other trials' growth
+// (26 entries, 19 preregs today, ~1.2 entries/day) can never make a REGISTERED trial render unregistered.
+// The real trials dir holds 26 entries today and grows ~1.2 a day; FH_PREREG_CAP 512 is over a year of
+// headroom above that, and past it (or past the FH_TRIALS_ENTRY_CAP runaway-dir guard, checked before
+// any file is read) the feed ABORTS with a named reason and exit code 3 — no push happens at all, so the
+// board is never fed a silently-wrong "unregistered version" line. Failing loudly beats failing quietly.
 const FH_ROOT_VERSION = '2907';
 const FH_LEGACY_VERSION = { '2907-jev-file-hint-shadow': '2907', '3031-jev-2907-shadow-v2': '3031-v2' };
 const FH_ENDED_TEXT = { '3031-v2': 'ended INCONCLUSIVE (#3080)' }; // the #3080 verdict is prose, keyed by version
-const FH_PREREG_CAP = 64;
+const FH_TRIALS_ENTRY_CAP = 4096; // runaway-dir guard only: this many trial ENTRIES, prereg or not
+const FH_PREREG_CAP = 512; // preregistrations only (26 entries / 19 preregs today → >1 year of headroom)
 let fhAll = [];
 let fhDirs = []; try { fhDirs = fs.readdirSync(path.join(AB, '.ai-workspace/trials')).sort(); } catch {}
-if (fhDirs.length > FH_PREREG_CAP) console.error('fileHint: ' + fhDirs.length + ' trial prereg dirs over cap ' + FH_PREREG_CAP + '; reading none, trusting none');
-else fhAll = fhDirs.map((dir) => {
+if (fhDirs.length > FH_TRIALS_ENTRY_CAP) { console.error('fileHint: ' + fhDirs.length + ' trial entries over FH_TRIALS_ENTRY_CAP ' + FH_TRIALS_ENTRY_CAP + '; aborting the feed — a runaway trials dir is never silently half-read'); process.exit(3); }
+let fhPreregs = 0; // counts PREREGISTRATIONS, not dirs: an entry with no readable preregistration.json is not a prereg
+fhAll = fhDirs.map((dir) => {
   let p = null; try { p = JSON.parse(fs.readFileSync(path.join(AB, '.ai-workspace/trials', dir, 'preregistration.json'), 'utf8')); } catch { return null; }
+  fhPreregs++;
   const version = p.prereg_version != null ? String(p.prereg_version) : (FH_LEGACY_VERSION[dir] ?? null);
   if (version == null) return null; // another trial's prereg: not a versioned file-hint shape
   const n = p.n_min != null ? p.n_min : (p.design || {}).n_min;
   return { dir, version, id: /^(\d+)/.exec(dir)?.[1] || null, nMin: n != null && Number(n) > 0 ? Number(n) : null, supersedes: p.supersedes != null ? String(p.supersedes) : null, frozenAt: String(p.frozen_at || '') };
 }).filter(Boolean);
+if (fhPreregs > FH_PREREG_CAP) { console.error('fileHint: ' + fhPreregs + ' preregistrations over FH_PREREG_CAP ' + FH_PREREG_CAP + '; aborting the feed — never silently rendering a registered trial unregistered'); process.exit(3); }
 const fhByVer = new Map(fhAll.map((p) => [p.version, p]));
 const fhInFamily = (p) => {
   let v = p.version; // walk the supersedes chain toward the root; hop-capped so a cycle cannot loop

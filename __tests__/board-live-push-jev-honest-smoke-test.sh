@@ -19,7 +19,7 @@ FX="$AB/tests/fixtures/board-truth"
 # gh must be absent from PATH: a dry run touches no network.
 TMPBIN="$(mktemp -d)"
 JFX="$(mktemp -d)"
-trap 'rm -rf "$TMPBIN" "$JFX" "$TAB1" "$TAB2" "$TAB3" "$TAB4"' EXIT
+trap 'rm -rf "$TMPBIN" "$JFX" "$TAB1" "$TAB2" "$TAB3" "$TAB4" "$TAB5" "$TAB6"' EXIT
 ln -s "$(command -v node)" "$TMPBIN/node"
 ln -s "$(command -v git)" "$TMPBIN/git"
 export PATH="$TMPBIN:/usr/bin:/bin"
@@ -98,18 +98,23 @@ BUILDEOF
 # --- fix1 synthetic PREREG overlays: throwaway BOARD_AI_BRAIN roots holding only skills (symlinked,
 # the feed imports status-tables from it) and synthetic .ai-workspace/trials preregistrations. The
 # committed numbers here are invented; no real prereg or row is copied.
-# fix2 (R2-3) adds TAB3/TAB4: the prereg-cap arms — TAB3 over the cap (65 dirs: the 3-family set plus
-# 62 other trials' preregs, which carry no prereg_version), TAB4 exactly at the cap (64 dirs).
-TAB1="$(mktemp -d)"; TAB2="$(mktemp -d)"; TAB3="$(mktemp -d)"; TAB4="$(mktemp -d)"
-for T in "$TAB1" "$TAB2" "$TAB3" "$TAB4"; do
+# fix2 (R2-3) added prereg-cap arms; fix3 (R3-1) re-bases them on the corrected cap: it bounds
+# PREREGISTRATIONS ONLY (512, >1 year of headroom over the real 19 preregs), an entry with no
+# preregistration.json never counts, and past it the feed ABORTS (nonzero exit, named stderr reason)
+# instead of silently rendering a registered trial unregistered. TAB3: 65 preregs (3 family + 62 other
+# trials') — well under the cap, family still trusted. TAB4: exactly 512 preregs — at the bound, no
+# abort. TAB5: 513 preregs — one over, the feed must abort. TAB6: 600 entries with NO prereg file —
+# non-prereg entries never count, family still trusted.
+TAB1="$(mktemp -d)"; TAB2="$(mktemp -d)"; TAB3="$(mktemp -d)"; TAB4="$(mktemp -d)"; TAB5="$(mktemp -d)"; TAB6="$(mktemp -d)"
+for T in "$TAB1" "$TAB2" "$TAB3" "$TAB4" "$TAB5" "$TAB6"; do
   mkdir -p "$T/.ai-workspace/trials" "$T/tests/fixtures"
   ln -s "$AB/skills" "$T/skills"
   ln -s "$AB/tests/fixtures/board-truth" "$T/tests/fixtures/board-truth"
 done
-node - "$TAB1" "$TAB2" "$TAB3" "$TAB4" <<'BUILDEOF' || fail "prereg overlay build failed"
+node - "$TAB1" "$TAB2" "$TAB3" "$TAB4" "$TAB5" "$TAB6" <<'BUILDEOF' || fail "prereg overlay build failed"
 const fs = require('fs'); const path = require('path');
 const write = (root, dir, j) => { const d = path.join(root, '.ai-workspace/trials', dir); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'preregistration.json'), JSON.stringify(j)); };
-const root1 = process.argv[2], root2 = process.argv[3], root3 = process.argv[4], root4 = process.argv[5];
+const root1 = process.argv[2], root2 = process.argv[3], root3 = process.argv[4], root4 = process.argv[5], root5 = process.argv[6], root6 = process.argv[7];
 const V1 = { ticket: 2907, n_min: 20, frozen_at: '2026-10-04' }; // legacy: no prereg_version (dir map resolves it)
 const V2 = { ticket: 3031, supersedes: 2907, n_min: 100, frozen_at: '2026-10-08' }; // legacy; supersedes as a number, like the real one
 const V3 = { ticket: 3164, supersedes: '3031-v2', prereg_version: '3164-v3', design: { n_min: 100 }, frozen_at: '2026-10-16' }; // n_min under design, like the real one
@@ -121,16 +126,18 @@ for (const root of [root1, root2]) {
 write(root1, '3164-jev-file-hint-v3', V3);
 write(root1, '3390-jev-file-hint-v4', V4);
 // root2 (noprereg arm): NO 3164 prereg — rows tagged 3164-v3 must still count
-// fix2 (R2-3) prereg-cap arms: root3 over the cap (3 family + 62 other trials' preregs = 65 dirs),
-// root4 exactly at it (3 family + 61 = 64). The fillers carry NO prereg_version and no legacy dir,
-// so they are other trials' preregs — the dir COUNT is what crosses the cap, not the family's size.
-for (const root of [root3, root4]) {
+// fix3 (R3-1) prereg-cap arms: root3 65 preregs (3 family + 62 other trials'), root4 exactly 512,
+// root5 513 (one over the cap: the feed must ABORT), root6 600 entries with NO prereg file (never
+// counted). The fillers carry NO prereg_version and no legacy dir, so they are other trials' preregs.
+for (const root of [root3, root4, root5, root6]) {
   write(root, '2907-jev-file-hint-shadow', V1);
   write(root, '3031-jev-2907-shadow-v2', V2);
   write(root, '3164-jev-file-hint-v3', V3);
 }
 for (let i = 0; i < 62; i++) write(root3, 'zz-other-trial-' + (9000 + i), { ticket: 9000 + i, n_min: 5, frozen_at: '2026-10-01' });
-for (let i = 0; i < 61; i++) write(root4, 'zz-other-trial-' + (9000 + i), { ticket: 9000 + i, n_min: 5, frozen_at: '2026-10-01' });
+for (let i = 0; i < 509; i++) write(root4, 'zz-other-trial-' + (9000 + i), { ticket: 9000 + i, n_min: 5, frozen_at: '2026-10-01' });
+for (let i = 0; i < 510; i++) write(root5, 'zz-other-trial-' + (9000 + i), { ticket: 9000 + i, n_min: 5, frozen_at: '2026-10-01' });
+for (let i = 0; i < 600; i++) fs.mkdirSync(path.join(root6, '.ai-workspace/trials', 'zz-empty-entry-' + (7000 + i)), { recursive: true });
 BUILDEOF
 
 run() {
@@ -147,6 +154,7 @@ runab() {
 }
 OUT_MIXED="$(mktemp)"; OUT_V2="$(mktemp)"; OUT_ALL="$(mktemp)"; OUT_EMPTY="$(mktemp)"; OUT_CAP="$(mktemp)"
 OUT_V4P="$(mktemp)"; OUT_V4R="$(mktemp)"; OUT_NP="$(mktemp)"; OUT_C65="$(mktemp)"; OUT_C64="$(mktemp)"
+OUT_C600="$(mktemp)"; ERR_C513="$(mktemp)"
 run mixed >"$OUT_MIXED" 2>/dev/null || fail "mixed run exited nonzero"
 run v2only >"$OUT_V2" 2>/dev/null || fail "v2only run exited nonzero"
 run alllabelled >"$OUT_ALL" 2>/dev/null || fail "alllabelled run exited nonzero"
@@ -155,19 +163,24 @@ run capped >"$OUT_CAP" 2>/dev/null || fail "capped run exited nonzero"
 runab v4pre "$TAB1" >"$OUT_V4P" 2>/dev/null || fail "v4pre run exited nonzero"
 runab v4rows "$TAB1" >"$OUT_V4R" 2>/dev/null || fail "v4rows run exited nonzero"
 runab noprereg "$TAB2" >"$OUT_NP" 2>/dev/null || fail "noprereg run exited nonzero"
-runab mixed "$TAB3" >"$OUT_C65" 2>/dev/null || fail "cap-65 run exited nonzero"
-runab mixed "$TAB4" >"$OUT_C64" 2>/dev/null || fail "cap-64 run exited nonzero"
+runab mixed "$TAB3" >"$OUT_C65" 2>/dev/null || fail "65-prereg run exited nonzero"
+runab mixed "$TAB4" >"$OUT_C64" 2>/dev/null || fail "512-prereg run exited nonzero"
+runab mixed "$TAB6" >"$OUT_C600" 2>/dev/null || fail "empty-entries run exited nonzero"
+# fix3 (R3-1) must-fire: 513 preregs (one over FH_PREREG_CAP) — the feed ABORTS nonzero with the named
+# reason on stderr; it never exits 0 with a silently unregistered family.
+if runab mixed "$TAB5" >/dev/null 2>"$ERR_C513"; then fail "513-prereg run must abort, exited 0"; fi
+command grep -q "aborting the feed" "$ERR_C513" || fail "513-prereg abort reason missing: $(cat "$ERR_C513")"
 
 # fix2 (R2-2): the raw-row-count guard reads the count from the fixture log itself, so it stays true
 # when the fixture grows — the checker recounts the mixed lesson-merge rows below.
-node - "$OUT_MIXED" "$OUT_V2" "$OUT_ALL" "$OUT_EMPTY" "$OUT_CAP" "$OUT_V4P" "$OUT_V4R" "$OUT_NP" "$OUT_C65" "$OUT_C64" "$JFX/mixed/lesson-merge-shadow/rows.jsonl" <<'EOF' || exit 1
+node - "$OUT_MIXED" "$OUT_V2" "$OUT_ALL" "$OUT_EMPTY" "$OUT_CAP" "$OUT_V4P" "$OUT_V4R" "$OUT_NP" "$OUT_C65" "$OUT_C64" "$OUT_C600" "$ERR_C513" "$JFX/mixed/lesson-merge-shadow/rows.jsonl" <<'EOF' || exit 1
 const fs = require('fs');
-const [mixedS, v2S, allS, emptyS, capS, v4pS, v4rS, npS, c65S, c64S, lmRowsPath] = process.argv.slice(2).map((p) => fs.readFileSync(p, 'utf8'));
+const [mixedS, v2S, allS, emptyS, capS, v4pS, v4rS, npS, c65S, c64S, c600S, c513e, lmRowsPath] = process.argv.slice(2).map((p) => fs.readFileSync(p, 'utf8'));
 const lmRows = lmRowsPath.split('\n').filter(Boolean).length; // the fixture's actual raw row count
 const bad = [];
 const chk = (name, ok) => { if (!ok) bad.push(name); };
-let mixed, v2, all, empty, cap, v4p, v4r, np, c65, c64;
-for (const [s, n, o] of [[mixedS, 'mixed', (x) => mixed = x], [v2S, 'v2only', (x) => v2 = x], [allS, 'alllabelled', (x) => all = x], [emptyS, 'empty', (x) => empty = x], [capS, 'capped', (x) => cap = x], [v4pS, 'v4pre', (x) => v4p = x], [v4rS, 'v4rows', (x) => v4r = x], [npS, 'noprereg', (x) => np = x], [c65S, 'cap65', (x) => c65 = x], [c64S, 'cap64', (x) => c64 = x]]) {
+let mixed, v2, all, empty, cap, v4p, v4r, np, c65, c64, c600;
+for (const [s, n, o] of [[mixedS, 'mixed', (x) => mixed = x], [v2S, 'v2only', (x) => v2 = x], [allS, 'alllabelled', (x) => all = x], [emptyS, 'empty', (x) => empty = x], [capS, 'capped', (x) => cap = x], [v4pS, 'v4pre', (x) => v4p = x], [v4rS, 'v4rows', (x) => v4r = x], [npS, 'noprereg', (x) => np = x], [c65S, 'cap65', (x) => c65 = x], [c64S, 'cap512', (x) => c64 = x], [c600S, 'cap600empty', (x) => c600 = x]]) {
   try { o(JSON.parse(s)); } catch { console.error('FAIL: ' + n + ' output is not one JSON object'); process.exit(1); }
 }
 const lm = mixed.jev.lessonMerge, fh = mixed.jev.fileHint, rs = mixed.jevResearch.shadows;
@@ -230,13 +243,17 @@ chk('fix1 noprereg: the state names it an unregistered version', np.jev.fileHint
 chk('fix1 noprereg: the older family still renders ended', Object.fromEntries(np.jev.fileHint.ended.map((e) => [e.version, e.state]))['3031-v2'] === 'ended INCONCLUSIVE (#3080)');
 chk('fix1 noprereg: no prereg to tag, the research card carries no id', np.jevResearch.shadows[1].id == null);
 chk('fix1 noprereg: notJudged == 1 (day-cap only; no_anchor is terminal)', np.jev.fileHint.notJudged === 1);
-// fix2 (R2-3): the prereg cap bounds the FILES READ — past it nothing is read or trusted: no committed
-// n_min survives (null) and the state names the fail-closed basis (unregistered version, or the
-// version-keyed concluded text when the newest unaccounted version is a concluded one)
-chk('fix2 prereg cap 65 dirs: nothing read or trusted past the cap — no committed n_min, fail-closed state', c65.jev.fileHint.nMin === null && ['3031-v2', '3164-v3'].includes(c65.jev.fileHint.version) && ['unregistered version', 'ended INCONCLUSIVE (#3080)'].includes(c65.jev.fileHint.state));
-chk('fix2 prereg cap 64 dirs: exactly at the cap the committed family is still trusted', c64.jev.fileHint.version === '3164-v3' && c64.jev.fileHint.nMin === 100 && Object.keys(Object.fromEntries(c64.jev.fileHint.ended.map((e) => [e.version, e.state]))).includes('3031-v2'));
+// fix3 (R3-1): the cap bounds PREREGISTRATIONS ONLY (never trial dirs) and past it the feed ABORTS
+// with a named reason (the nonzero exit + stderr reason are asserted in bash above) — a registered
+// family is never silently rendered unregistered because OTHER trials grew the folder
+chk('fix3 65 preregs (3 family + 62 other trials\'): the registered family still shows registered with its target', c65.jev.fileHint.version === '3164-v3' && c65.jev.fileHint.nMin === 100 && c65.jev.fileHint.state !== 'unregistered version');
+chk('fix3 65 preregs: the older family still renders ended', Object.fromEntries(c65.jev.fileHint.ended.map((e) => [e.version, e.state]))['3031-v2'] === 'ended INCONCLUSIVE (#3080)');
+chk('fix3 exactly 512 preregs: at the bound no abort, committed family still trusted', c64.jev.fileHint.version === '3164-v3' && c64.jev.fileHint.nMin === 100);
+chk('fix3 513 preregs: the abort names the cap and the reason (exit asserted nonzero in bash)', /FH_PREREG_CAP 512/.test(c513e) && /aborting the feed/.test(c513e));
+chk('fix3 600 non-prereg entries: empty trial dirs never count toward the prereg cap — no abort, target intact', c600.jev.fileHint.version === '3164-v3' && c600.jev.fileHint.nMin === 100);
+chk('fix3 a committed trial is never labelled unregistered version while its prereg is committed', c65.jev.fileHint.state !== 'unregistered version' && c64.jev.fileHint.state !== 'unregistered version' && c600.jev.fileHint.state !== 'unregistered version');
 if (bad.length) { console.error('FAIL: ' + bad.join('; ')); process.exit(1); }
-console.log('jev-honest smoke: 46 arms OK (MF1-5, MNF1/2/4, privacy, input bound, fix1 version rule + backlog basis, fix2 prereg cap)');
+console.log('jev-honest smoke: 50 arms OK (MF1-5, MNF1/2/4, privacy, input bound, fix1 version rule + backlog basis, fix3 prereg cap aborts loudly, preregs only)');
 EOF
 RC=$?
 rm -f "$OUT_MIXED" "$OUT_V2" "$OUT_ALL" "$OUT_EMPTY" "$OUT_CAP" "$OUT_V4P" "$OUT_V4R" "$OUT_NP" "$OUT_C65" "$OUT_C64"

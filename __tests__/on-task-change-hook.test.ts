@@ -27,6 +27,13 @@
 //       #1158 Layer-B contract (hook-invoked courier traverses to auth) kept
 //       alive under the new guards.
 //
+//   (d) pause-gate         — #3520 area 23: the courier arm of the REAL hook is
+//       gated behind the fail-closed Vercel pause marker. The two AC-3 arms
+//       point KANBAN_VERCEL_LIVE_FILE at a marker that EXISTS (hermetic and
+//       deterministic: they pass in CI, where the real marker is absent), and
+//       a third arm points it at one that does NOT, asserting the skip is
+//       LOGGED (`skipped vercel-paused`) and the courier never runs.
+//
 // HERMETICITY (R2-MED-1 + #1050 B1 fence, updated for #1405's OIDC-only 2-arm
 // reality): (a) the ambient VERCEL_OIDC_TOKEN / BLOB_STORE_ID env vars are
 // DELETED, (b) OIDC_TOKEN_FILE points at a NONEXISTENT temp path (so the real
@@ -57,6 +64,7 @@ const HOOK = join(process.cwd(), "scripts", "on-task-change.sh");
 let root: string;
 let stubDir: string;
 let logPath: string;
+let liveMarker: string;
 
 /** Build the hermetic env: PATH stubs + unset creds + fenced OIDC + temp SYNC_LOG/OUT. */
 function hookEnv(extra: Record<string, string>): Record<string, string | undefined> {
@@ -103,6 +111,13 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "akb-hook-"));
   logPath = join(root, "sync.log");
 
+  // #3520 area 23: the un-pause marker the hook's fail-closed Vercel gate checks.
+  // KANBAN_VERCEL_LIVE_FILE overrides the default $HOME path, so the AC-3 arms
+  // below are hermetic AND deterministic — they pass even on a host (CI) where
+  // the real marker is absent.
+  liveMarker = join(root, "kanban-vercel-live");
+  writeFileSync(liveMarker, "", "utf8");
+
   // A `security` stub that always fails (exit 1). Shadows /usr/bin/security.
   // Defense-in-depth: keeps this hook test hermetic even if an exec-based
   // credential arm (keyed on the revoked RW-token service name) is ever
@@ -145,7 +160,13 @@ describe("on-task-change.sh — #1158 Layer B / #1578 AC-3 mandatory hook smoke"
       "utf8"
     );
     const boardPath = join(root, "board.json");
-    const env = hookEnv({ TASKS_DIR: tasksDir, OUT: boardPath });
+    // Pause gate OPEN: the marker exists, so the hook reaches the courier and
+    // the marker-proof below exercises the full traversal (not a pause skip).
+    const env = hookEnv({
+      TASKS_DIR: tasksDir,
+      OUT: boardPath,
+      KANBAN_VERCEL_LIVE_FILE: liveMarker,
+    });
 
     // (a) fence-integrity — before spawning, confirm all three credential
     // locks are engaged.
@@ -210,7 +231,13 @@ describe("on-task-change.sh — #1158 Layer B / #1578 AC-3 mandatory hook smoke"
       );
     }
     const boardPath = join(root, "board.json");
-    const env = hookEnv({ TASKS_DIR: tasksDir, OUT: boardPath });
+    // Pause gate OPEN (see the marker-proof arm): the courier runs so the
+    // traversal proof below is not short-circuited by the Vercel pause.
+    const env = hookEnv({
+      TASKS_DIR: tasksDir,
+      OUT: boardPath,
+      KANBAN_VERCEL_LIVE_FILE: liveMarker,
+    });
 
     // (a) fence-integrity, same mandatory pre-assertion as the marker-proof case.
     assertFenceEngaged(env);
@@ -238,6 +265,62 @@ describe("on-task-change.sh — #1158 Layer B / #1578 AC-3 mandatory hook smoke"
     }
   });
 
+  it("AC-PAUSE-GATE: marker absent → upload skipped and LOGGED (vercel-paused); the courier never runs", () => {
+    // #3520 area 23 (MEDIUM-2): the Vercel pause is FAIL-CLOSED. The marker
+    // points at a path that does NOT exist, so the gate's verdict cannot
+    // depend on the host machine's real marker. The fixture is the SAME
+    // real-shaped store as the traversal arm — reaching the courier is
+    // POSSIBLE, so the skip below proves the GATE, not the fixture.
+    const tasksDir = join(root, "tasks");
+    const session = join(tasksDir, "a1b2c3d4-pause-fixture");
+    mkdirSync(session, { recursive: true });
+    for (let i = 0; i < 12; i++) {
+      writeFileSync(
+        join(session, `${6100 + i}.json`),
+        JSON.stringify({
+          id: String(6100 + i),
+          subject: `Pause fixture ticket ${i}`,
+          description: "Lorem ipsum dolor sit amet. ".repeat(80),
+          status: "pending",
+          blocks: [],
+          blockedBy: [],
+        }),
+        "utf8"
+      );
+    }
+    const boardPath = join(root, "board.json");
+    const env = hookEnv({
+      TASKS_DIR: tasksDir,
+      OUT: boardPath,
+      KANBAN_VERCEL_LIVE_FILE: join(root, "absent-kanban-vercel-live"),
+    });
+
+    // (a) fence-integrity, same mandatory pre-assertion: the skip below is the
+    // gate's, not a courier that bailed early on a missing credential.
+    assertFenceEngaged(env);
+
+    const res = spawnSync("bash", [HOOK], {
+      env: env as unknown as NodeJS.ProcessEnv,
+      encoding: "utf8",
+    });
+
+    // The hook preserved the PostToolUse exit-0 contract while paused.
+    expect(res.status).toBe(0);
+
+    const recs = readSyncLog(logPath);
+    // The skip is on the record — never silent.
+    const paused = recs.filter(
+      (r) => r.result === "skipped" && r.reason === "vercel-paused"
+    );
+    expect(paused.length).toBeGreaterThanOrEqual(1);
+    // And the courier NEVER ran: no outcome record of its own. (The traversal
+    // arm proves the same-shaped fixture DOES reach the courier's own record
+    // when the marker is present — the only difference is the gate.)
+    expect(recs.filter((r) => r.result === "skipped-no-token")).toHaveLength(0);
+    expect(recs.filter((r) => r.result === "refused")).toHaveLength(0);
+    expect(recs.filter((r) => r.result === "uploaded")).toHaveLength(0);
+  });
+
   it("AC-EXPORT-FAIL: export:board failure → hook still exits 0 AND logs `export-failed`", () => {
     // An EMPTY tasks dir → collectSessions() finds no session → export-board exits 1.
     const emptyTasks = join(root, "empty-tasks");
@@ -245,7 +328,13 @@ describe("on-task-change.sh — #1158 Layer B / #1578 AC-3 mandatory hook smoke"
     const boardPath = join(root, "missing-board.json"); // never written → courier sees board-not-found
 
     const res = spawnSync("bash", [HOOK], {
-      env: hookEnv({ TASKS_DIR: emptyTasks, OUT: boardPath }) as unknown as NodeJS.ProcessEnv,
+      env: hookEnv({
+        TASKS_DIR: emptyTasks,
+        OUT: boardPath,
+        // Deterministic regardless of the host's real marker: this arm is
+        // about the export failure, not the pause gate.
+        KANBAN_VERCEL_LIVE_FILE: join(root, "absent-kanban-vercel-live"),
+      }) as unknown as NodeJS.ProcessEnv,
       encoding: "utf8",
     });
 

@@ -7,8 +7,9 @@
 # fresh clone it is inert until that settings.json entry is added (see README,
 # "Live sync — opt-in PostToolUse hook").
 #
-# The hook re-exports data/board.json locally and then UNCONDITIONALLY runs the
-# courier, which owns credential resolution (OIDC-first, RW fallback — see
+# The hook re-exports data/board.json locally and then runs the
+# courier (gated behind the Vercel pause marker — #3520 area 23), which owns
+# credential resolution (OIDC-first, RW fallback — see
 # scripts/blob-auth.ts) + writes its own outcome record to data/sync.log
 # (uploaded / skipped-no-token / failed). With a reachable credential it genuinely
 # uploads; with none it logs a precise `skipped-no-token` and the hook STILL exits 0
@@ -43,7 +44,22 @@ if ! npm run --silent export:board >/dev/null 2>&1; then
   log_sync failed export-failed
 fi
 
-# Then UNCONDITIONALLY run the courier — it owns token resolution + its own outcome
+# #3520 area 23 (fix round 1, MEDIUM-2): the Vercel kanban is PAUSED (operator moment (ii)). The
+# upload arm is gated behind that pause with a FAIL-CLOSED marker: the courier runs only when the
+# un-pause marker exists (default $HOME/.claude/.kanban-vercel-live; KANBAN_VERCEL_LIVE_FILE lets
+# smokes point elsewhere). While the pause is on the local export above still runs (data/board.json
+# stays fresh for the area-24 owner readers), the upload is SKIPPED and LOGGED
+# (result=skipped reason=vercel-paused) — nothing is silent. Un-pausing Vercel = creating the
+# marker; no code change (the same re-arm the retired kanban-resync arm documents). This is the
+# ONE pause gate: every edge that can reach the courier (this TaskCreate|TaskUpdate job and the
+# kanban-resync launcher's real arm) goes through this script, so no edge can upload past the pause.
+VERCEL_LIVE_FILE="${KANBAN_VERCEL_LIVE_FILE:-$HOME/.claude/.kanban-vercel-live}"
+if [ ! -f "$VERCEL_LIVE_FILE" ]; then
+  log_sync skipped vercel-paused
+  exit 0
+fi
+
+# Then run the courier (pause gate above) — it owns token resolution + its own outcome
 # record. The `|| true` is a NON-ABORTING wrapper (HIGH-1): under `set -euo pipefail`
 # a non-zero courier (the genuine no-token case REQUIRES a non-zero exit) would
 # otherwise abort the script before `exit 0`. This is NOT a blind swallow — the

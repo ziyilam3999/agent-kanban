@@ -76,13 +76,24 @@ const j = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
 // #3520 area 23 fix round 1 (HIGH-1): with no board input the lanes come FROM THE LEDGER — the
 // status-tables work pool on this fixture is exactly 9301/9412/9414/9415, all live. An empty or
 // short lane list here is the round-1 bug (zeros with a lying laneSource label) coming back.
+// Fix round 2 (LOW-C): the reader's SHIP-TAIL pool is carried too — on this fixture the
+// waiting-to-merge lanes 9302 and 9411 join the lanes as column in_review and counts.in_review,
+// and the four ledger-gap counts are null with their names in countsLedgerGaps (never a silent 0).
 if (j.laneSource !== 'ledger') { console.error('FAIL: no-board laneSource=' + j.laneSource); process.exit(1); }
 const ids = (j.lanes || []).map((l) => String(l.id)).sort();
-const want = ['9301', '9412', '9414', '9415'];
-if (ids.length !== want.length || ids.some((x, i) => x !== want[i])) { console.error('FAIL: no-board lanes=' + JSON.stringify(ids) + ' (want the fixture work pool ' + JSON.stringify(want) + ')'); process.exit(1); }
-if (!(j.lanes || []).every((l) => l.live)) { console.error('FAIL: a no-board lane is not live'); process.exit(1); }
-if (!j.counts || j.counts.in_progress !== want.length) { console.error('FAIL: no-board counts.in_progress=' + (j.counts && j.counts.in_progress)); process.exit(1); }
-console.log('no-board run: exit 0, laneSource ledger, ' + ids.length + ' live lanes from the ledger, board.json never read');
+const want = ['9301', '9302', '9411', '9412', '9414', '9415'];
+if (ids.length !== want.length || ids.some((x, i) => x !== want[i])) { console.error('FAIL: no-board lanes=' + JSON.stringify(ids) + ' (want the fixture work pool + ship-tail ' + JSON.stringify(want) + ')'); process.exit(1); }
+const workIds = ['9301', '9412', '9414', '9415'];
+if (!(j.lanes || []).filter((l) => workIds.includes(String(l.id))).every((l) => l.live)) { console.error('FAIL: a no-board work lane is not live'); process.exit(1); }
+const mergeIds = ['9302', '9411'];
+if (!(j.lanes || []).filter((l) => mergeIds.includes(String(l.id))).every((l) => l.column === 'in_review')) { console.error('FAIL: a waiting-to-merge lane is not in the in_review column'); process.exit(1); }
+if (!j.counts || j.counts.in_progress !== workIds.length) { console.error('FAIL: no-board counts.in_progress=' + (j.counts && j.counts.in_progress)); process.exit(1); }
+if (j.counts.in_review !== mergeIds.length) { console.error('FAIL: no-board counts.in_review=' + j.counts.in_review + ' (want the carried ship-tail count ' + mergeIds.length + ')'); process.exit(1); }
+for (const k of ['blocked', 'todo_work', 'parked', 'bookkeeping']) {
+  if (j.counts[k] !== null) { console.error('FAIL: no-board counts.' + k + '=' + JSON.stringify(j.counts[k]) + ' (must be null, never a silent 0)'); process.exit(1); }
+  if (!(j.countsLedgerGaps || []).includes(k)) { console.error('FAIL: countsLedgerGaps does not name ' + k); process.exit(1); }
+}
+console.log('no-board run: exit 0, laneSource ledger, ' + workIds.length + ' work + ' + mergeIds.length + ' waiting-to-merge lanes from the ledger, ledger-gap counts null, board.json never read');
 NODENOBOARD
 
 echo "parity smoke: all arms green"

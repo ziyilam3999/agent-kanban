@@ -205,28 +205,41 @@ const zaiModel = (id, role) => {
 // #3520 area 23 fix round 1 (HIGH-1): with NO --board fixture the lane rows, counts and parity are
 // built from the 3-role LEDGER itself — the status-tables WORK pool (the owner reader) joined with
 // the task store for subject/blockers/updatedAt — so board.json absent is a ledger-sourced board,
-// never an empty one. An active ledger lane renders as column in_progress; the board's old
-// in_review column has no ledger-side owner, so in ledger mode in_review stays 0 rather than being
-// invented. INPUT-BOUND: one pass over the reader's own bounded output — a work-pool answer longer
-// than LEDGER_LANE_CAP rows fails CLOSED (nothing synthesized: a lane set off a possibly-truncated
-// read must never publish as the board).
+// never an empty one. An active ledger lane renders as column in_progress.
+// Fix round 2 (LOW-C): the reader's SHIP-TAIL pool (tickets waiting to merge) is ledger-owned too,
+// so those lanes are CARRIED (rendered as the board's in_review column, and counted in
+// counts.in_review). The remaining counts (blocked / todo_work / parked / bookkeeping) have NO
+// ledger-side owner yet (area 24's owner-reader redesign owns them) — they are published as null
+// with their names in countsLedgerGaps ("not available in ledger mode"), NEVER a silent 0.
+// INPUT-BOUND: one pass over the reader's own bounded output — a lane pool longer than
+// LEDGER_LANE_CAP rows fails CLOSED and LOUD (fix round 2, LOW-D: a non-zero exit with the reason
+// on stderr; nothing is published, and never an empty board pretending to be the truth).
 const LEDGER_LANE_CAP = 200;
 const laneSource = BOARD_FLAG ? 'board' : 'ledger';
 let laneTickets = tickets;
+let countsLedgerGaps = null;
 if (!BOARD_FLAG) {
-  const pool = ((stJson && stJson.lanes && Array.isArray(stJson.lanes.rows) ? stJson.lanes.rows : [])).filter((x) => x.pool === 'work');
-  laneTickets = pool.length > LEDGER_LANE_CAP ? [] : pool.map((x) => {
+  const stRows = stJson && stJson.lanes && Array.isArray(stJson.lanes.rows) ? stJson.lanes.rows : [];
+  const pool = stRows.filter((x) => x.pool === 'work' || x.pool === 'ship_tail');
+  if (pool.length > LEDGER_LANE_CAP) {
+    console.error(`board-live-push: refusing to publish — the ledger lane pool is ${pool.length} rows, over the LEDGER_LANE_CAP of ${LEDGER_LANE_CAP} (fail closed and loud; nothing published)`);
+    process.exit(1);
+  }
+  laneTickets = pool.map((x) => {
+    const waitingToMerge = x.pool === 'ship_tail';
     let t = null; try { t = JSON.parse(fs.readFileSync(path.join(TASKS_DIR, SID || '', String(x.id) + '.json'), 'utf8')); } catch {}
     const last = ledger(String(x.id)).at(-1);
     const subject = (t && t.subject) || (x.what && x.what !== '(subject unavailable)' ? x.what : '#' + x.id);
     const updatedMs = (t && (Number(t.updatedAt) || Date.parse(t.updatedAt))) || Date.parse((last && (last.closedAt || last.ts)) || '') || NOW_MS;
-    return { id: String(x.id), subject, column: 'in_progress', status: 'in_progress', kind: 'work',
+    return { id: String(x.id), subject, column: waitingToMerge ? 'in_review' : 'in_progress', status: waitingToMerge ? 'in_review' : 'in_progress', kind: 'work',
       blockedBy: ((t && t.blockedBy) || []).map(String).filter((x2) => x2 !== '').join(' '), doneBlockers: '',
       updatedAt: new Date(updatedMs).toISOString() };
   });
   snap = { generatedAt: snap.generatedAt, boardGeneratedAt: null, count: laneTickets.length, rows: laneTickets };
-  counts.in_progress = laneTickets.filter(isWork).length;
-  counts.in_review = 0; counts.blocked = 0; counts.todo_work = 0; counts.parked = 0; counts.bookkeeping = 0;
+  counts.in_progress = laneTickets.filter((t) => t.column === 'in_progress' && isWork(t)).length;
+  counts.in_review = laneTickets.filter((t) => t.column === 'in_review' && isWork(t)).length;
+  counts.blocked = null; counts.todo_work = null; counts.parked = null; counts.bookkeeping = null;
+  countsLedgerGaps = ['blocked', 'todo_work', 'parked', 'bookkeeping'];
   active = laneTickets.filter(isWork).map((t) => ({ id: t.id, subject: t.subject.slice(0, 220), column: t.column, kind: t.kind, blockedBy: t.blockedBy, updatedAt: t.updatedAt }));
 }
 const lanes = laneTickets.filter((t) => t.column === 'in_progress' || t.column === 'in_review').map((t) => {
@@ -520,7 +533,7 @@ try {
   };
 } catch (e) { console.error('jevResearch: ' + (e && e.message)); }
 const laneCap = (() => { const m = /^work_ceiling=(\d+)$/m.exec(run(["hooks/3role-ledger.mjs", "resolve-mode"])); return m ? Number(m[1]) : 4; })();
-const summary = JSON.stringify({ focuses, focusTotals, jevResearch, generatedAt: snap.generatedAt, counts, rows: active, shelfRows, seats, lanes: lanes.filter((l) => l.recent), laneCap, jev, shelf, laneSource });
+const summary = JSON.stringify({ focuses, focusTotals, jevResearch, generatedAt: snap.generatedAt, counts, rows: active, shelfRows, seats, lanes: lanes.filter((l) => l.recent), laneCap, jev, shelf, laneSource, ...(countsLedgerGaps ? { countsLedgerGaps } : {}) });
 // #3278: the #2 body carries ONLY the loader's read set — the page's details loader reads v.details
 // (per entry d/tl) and never the top-level generatedAt (the stale-body check compares #1's against
 // #4's; the render harness fixture already omits it), so it is dropped for headroom.

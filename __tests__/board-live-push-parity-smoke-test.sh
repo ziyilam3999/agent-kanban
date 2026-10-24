@@ -3,8 +3,10 @@
 # ledger ONLY. The kanban selector parity input (the --kanban-json flag and the kanban-lanes.ts
 # spawn behind laneSource 'kanban') is retired with the Vercel pause, so the frozen fixture now has
 # exactly ONE right answer — the ledger one — and the retired seam must be REFUSED (unknown flag,
-# fail closed). A third arm proves the area-23 live shape: with NO --board flag and the default
-# board.json path absent, the feed still runs and reports laneSource 'ledger'.
+# fail closed). laneSource is DERIVED from where the lane rows came from (fix round 1, HIGH-1):
+# 'board' on the --board fixture arm, 'ledger' on the no-board arm. A third arm proves the area-23
+# live shape: with NO --board flag and the default board.json path absent, the feed builds its lanes
+# FROM THE LEDGER (the fixture work pool, non-empty) and reports laneSource 'ledger'.
 # Needs BOARD_AI_BRAIN -> an ai-brain checkout that carries tests/fixtures/board-truth.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,7 +52,7 @@ const exp = JSON.parse(e);
 const lane = (o, id) => (o.lanes || []).find((l) => String(l.id) === id);
 // #3520 area 23: the ONE answer is the ledger one — the fixture's wrong_answers are what must NOT
 // come back (9410 was wrongly live, 9411 stuck at execution-review, 6 lanes published).
-chk('laneSource == ledger (always)', green.laneSource === 'ledger');
+chk('laneSource == board (derived: the fixture seam supplied the rows)', green.laneSource === 'board');
 chk('lane 9410 live == false (the ledger answer)', lane(green, '9410') === undefined || lane(green, '9410').live === false);
 chk('lane 9411 flow has cur:ship-tail (the ledger answer)', lane(green, '9411') && String(lane(green, '9411').flow).includes('cur:ship-tail'));
 chk('lanes.length == 7', (green.lanes || []).length === 7);
@@ -71,9 +73,16 @@ HOME="$NOBOARD" node "$SCRIPT" --session "$SID" --ledger-dir "$FX/ledger" --even
 [ ! -e "$NOBOARD/coding_projects/agent-kanban/data/board.json" ] || fail "the no-board HOME unexpectedly carries a board.json"
 node - "$NOBOARD/out.json" <<'NODENOBOARD' || exit 1
 const j = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
+// #3520 area 23 fix round 1 (HIGH-1): with no board input the lanes come FROM THE LEDGER — the
+// status-tables work pool on this fixture is exactly 9301/9412/9414/9415, all live. An empty or
+// short lane list here is the round-1 bug (zeros with a lying laneSource label) coming back.
 if (j.laneSource !== 'ledger') { console.error('FAIL: no-board laneSource=' + j.laneSource); process.exit(1); }
-if (!Array.isArray(j.lanes)) { console.error('FAIL: no lanes array'); process.exit(1); }
-console.log('no-board run: exit 0, laneSource ledger, board.json never read');
+const ids = (j.lanes || []).map((l) => String(l.id)).sort();
+const want = ['9301', '9412', '9414', '9415'];
+if (ids.length !== want.length || ids.some((x, i) => x !== want[i])) { console.error('FAIL: no-board lanes=' + JSON.stringify(ids) + ' (want the fixture work pool ' + JSON.stringify(want) + ')'); process.exit(1); }
+if (!(j.lanes || []).every((l) => l.live)) { console.error('FAIL: a no-board lane is not live'); process.exit(1); }
+if (!j.counts || j.counts.in_progress !== want.length) { console.error('FAIL: no-board counts.in_progress=' + (j.counts && j.counts.in_progress)); process.exit(1); }
+console.log('no-board run: exit 0, laneSource ledger, ' + ids.length + ' live lanes from the ledger, board.json never read');
 NODENOBOARD
 
 echo "parity smoke: all arms green"

@@ -85,12 +85,13 @@ if ! command grep -q "board-live focus details (auto) too large" "$WORK/bigcap.e
 fi
 
 # --- #3520 area 23: lane parity is ledger-only. No selector spawn happens (the retired join would
-# have read data/board.json through kanban-lanes.ts), the summary reports laneSource == 'ledger',
+# have read data/board.json through kanban-lanes.ts), the summary reports the DERIVED laneSource —
+# 'board' here, because this run feeds the frozen --board fixture (fix round 1: never a constant) —
 # and the retired --kanban-json seam is REFUSED as an unknown flag before any data read (fail closed).
 run > "$WORK/green-nokanban.json" 2>/dev/null || fail "green run without --kanban-json exited nonzero"
-node - "$WORK/green-nokanban.json" <<'NODE' || fail "laneSource is not ledger"
+node - "$WORK/green-nokanban.json" <<'NODE' || fail "laneSource is not the derived board label"
 const j = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
-if (j.laneSource !== 'ledger') { console.error('laneSource=' + j.laneSource); process.exit(1); }
+if (j.laneSource !== 'board') { console.error('laneSource=' + j.laneSource); process.exit(1); }
 NODE
 run --kanban-json "$FX/kanban.json" > "$WORK/refused.out" 2> "$WORK/refused.err"; rc_refused=$?
 [ "$rc_refused" = "2" ] || fail "--kanban-json exited $rc_refused (must be refused with exit 2)"
@@ -139,7 +140,7 @@ for (const f of stub) {
 }
 chk('body carries generatedAt', typeof body.generatedAt === 'string' && body.generatedAt);
 if (bad.length) { console.error('FAIL: ' + bad.join('; ')); process.exit(1); }
-console.log('size smoke: summary ' + JSON.stringify(green).length + ' bytes (cap 48000); the pre-fix blob on the same fixture ' + redN + ' bytes (>62000); ticket lists ride the #4 body; wtd fields integer on every card; laneSource ledger (#3520 area 23)');
+console.log('size smoke: summary ' + JSON.stringify(green).length + ' bytes (cap 48000); the pre-fix blob on the same fixture ' + redN + ' bytes (>62000); ticket lists ride the #4 body; wtd fields integer on every card; laneSource derived (#3520 area 23)');
 NODE
 
 # --- #3278 details arm: the #2 body (per-ticket description + step timeline) under the cap WITH

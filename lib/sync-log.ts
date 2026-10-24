@@ -17,11 +17,16 @@ import * as path from "node:path";
  * missing (`publish-optin-missing`) or the board content failed the
  * fixture-shape floor (`synthetic-board`). It counts as a non-success outcome
  * everywhere `result` is consumed (consecutiveTrailingFailures already fails
- * closed on anything outside `uploaded` / `skipped-unchanged`). */
+ * closed on anything outside `uploaded` / `skipped-unchanged`).
+ * `skipped` (#3520 area 23) is the on-task-change hook's own pause-gate outcome
+ * (`reason=vercel-paused`): the courier was deliberately not run. It is likewise
+ * a non-success outcome for freshness (a paused sync proves nothing about the
+ * remote board's freshness). */
 export type SyncResult =
   | "uploaded"
   | "skipped-no-token"
   | "skipped-unchanged"
+  | "skipped"
   | "failed"
   | "refused";
 

@@ -137,13 +137,13 @@ else {
   process.stdout.write(JSON.stringify(focuses));
 }
 FF
-# --- frozen board fixture (DEMO ids only) + a quiet kanban selector state (no tsx spawn)
+# --- frozen board fixture (DEMO ids only); the --board seam stays (#3520 area 23: the LIVE
+# data/board.json is no longer an input, the fixture flag is) and no kanban selector state is read.
 cat >"$DATA/board.json" <<'BOARD'
 { "generatedAt": "2026-10-15T07:00:00Z", "rows": [
   { "id": 7001, "title": "DEMO lane one", "column": "in_progress", "updatedAt": "2026-10-15T06:00:00Z" },
   { "id": 7002, "title": "DEMO todo one", "column": "todo", "updatedAt": "2026-10-15T06:30:00Z" } ] }
 BOARD
-printf '{ "active": [], "lanes": [], "shelf": {} }' >"$DATA/kanban.json"
 
 # run_push <st_mode> <ff_mode> [extra flags...] — a FULL push (no --dry-run) against the sandbox.
 # FF_DIR (optional) overrides the focus dir, e.g. $FD_NONE for the missing-script arm.
@@ -152,7 +152,7 @@ run_push() {
   : >"$GH_LOG"; mkdir -p "$TMPHOME/.claude/board-live"; rm -f "$TMPHOME/.claude/board-live/state.json"
   HOME="$TMPHOME" ST_MODE="$st" FF_MODE="$ff" BOARD_AI_BRAIN="$AB" \
     PATH="$TMPBIN:/usr/bin:/bin" node "$SCRIPT" --board "$DATA/board.json" --focus-dir "${FF_DIR:-$FD}" \
-    --kanban-json "$DATA/kanban.json" --session "$SID" --ledger-dir "$DATA/empty" --events-dir "$DATA/empty" \
+    --session "$SID" --ledger-dir "$DATA/empty" --events-dir "$DATA/empty" \
     --tasks-dir "$DATA/empty" --now "$NOW" "$@"
 }
 upserts() { [ -f "$GH_LOG" ] && wc -l <"$GH_LOG" | tr -d ' ' || echo 0; }
@@ -218,13 +218,13 @@ if [ -n "${BASE_MJS:-}" ]; then
   BODY_H="$(mktemp)"; BODY_B="$(mktemp)"; DRY_H="$(mktemp)"; DRY_B="$(mktemp)"
   run_push ok ok --focus-body >"$BODY_H" 2>/dev/null || fail "healthy --focus-body (head) exited nonzero"
   HOME="$TMPHOME" ST_MODE=ok FF_MODE=ok BOARD_AI_BRAIN="$AB" PATH="$TMPBIN:/usr/bin:/bin" \
-    node "$BASE_MJS" --board "$DATA/board.json" --focus-dir "$FD" --kanban-json "$DATA/kanban.json" \
+    node "$BASE_MJS" --board "$DATA/board.json" --focus-dir "$FD" \
     --session "$SID" --ledger-dir "$DATA/empty" --events-dir "$DATA/empty" --tasks-dir "$DATA/empty" \
     --now "$NOW" --focus-body >"$BODY_B" 2>/dev/null || fail "healthy --focus-body (base) exited nonzero"
   cmp -s "$BODY_H" "$BODY_B" || fail "healthy #4 body differs from base"
   run_push ok ok --dry-run --json >"$DRY_H" 2>/dev/null || fail "healthy --dry-run (head) exited nonzero"
   HOME="$TMPHOME" ST_MODE=ok FF_MODE=ok BOARD_AI_BRAIN="$AB" PATH="$TMPBIN:/usr/bin:/bin" \
-    node "$BASE_MJS" --board "$DATA/board.json" --focus-dir "$FD" --kanban-json "$DATA/kanban.json" \
+    node "$BASE_MJS" --board "$DATA/board.json" --focus-dir "$FD" \
     --session "$SID" --ledger-dir "$DATA/empty" --events-dir "$DATA/empty" --tasks-dir "$DATA/empty" \
     --now "$NOW" --dry-run --json >"$DRY_B" 2>/dev/null || fail "healthy --dry-run (base) exited nonzero"
   cmp -s "$DRY_H" "$DRY_B" || fail "healthy dry-run summary differs from base"

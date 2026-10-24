@@ -3,9 +3,10 @@
 # under the issue-body size cap WITH HEADROOM once the per-ticket focus lists move to their own pinned
 # issue #4, and the merged size-weighted % rides the cards untouched. RED control built in: the pinned
 # PRE-FIX blob (398cbca) on the same fixture must EXCEED 62000 — the live crash reproduced by code (SMOKE exits
-# non-zero on master: every GREEN arm below fails there). Also proves the deploy join: the selector
-# the feed spawns is the tracked scripts/kanban-lanes.ts of this checkout, and without --kanban-json
-# the feed reports laneSource == 'kanban'. #3278 adds the details arm: the #2 body (per-ticket
+# non-zero on master: every GREEN arm below fails there). #3520 area 23: the selector deploy join is
+# RETIRED (lane parity reads the 3-role ledger only) — the arm now proves laneSource == 'ledger'
+# with no selector spawn and that --kanban-json is REFUSED (unknown flag, fail closed). #3278 adds
+# the details arm: the #2 body (per-ticket
 # description + timeline) <= 50000 with headroom, its own pinned RED control (blob 0555ad2) and a
 # doubled-board growth bound.
 # Needs BOARD_AI_BRAIN -> an ai-brain checkout carrying tests/fixtures/board-size (the FX fixture)
@@ -74,7 +75,7 @@ const t = { id: '9999', subject: 'fixture over-cap arm (synthesized)', status: '
 fs.writeFileSync(d + '/tasks/9999.json', JSON.stringify(t, null, 1) + '\n');
 NODE
 mkdir -p "$BIG/bin"; ln -sf "$(command -v node)" "$BIG/bin/node"
-env PATH="$BIG/bin" "$BIG/bin/node" "$SCRIPT" --board "$FX/board.json" --kanban-json "$FX/kanban.json" \
+env PATH="$BIG/bin" "$BIG/bin/node" "$SCRIPT" --board "$FX/board.json" \
   --session "$SID" --ledger-dir "$WORK/ledger" --events-dir "$WORK/ledger" --tasks-dir "$WORK/tasks" \
   --now "$NOW" --focus-dir "$BIG" > "$WORK/bigcap.out" 2> "$WORK/bigcap.err"; rc_big=$?
 [ "$rc_big" != 0 ] || fail "F3: an over-cap #4 body did not abort the push (rc=0)"
@@ -83,39 +84,20 @@ if ! command grep -q "board-live focus details (auto) too large" "$WORK/bigcap.e
   fail "F3: the abort is not the pre-push size guard naming #4 first (rc=$rc_big)"
 fi
 
-# --- deploy join (A2): the tracked selector answers, both directly and through the feed's own spawn
-node - "$SCRIPT" <<'NODE' || fail "A2: the selector the feed spawns is not the tracked one"
-const fs = require('fs'); const path = require('path');
-const feed = process.argv[2];
-const joined = path.dirname(fs.realpathSync(feed)) + '/kanban-lanes.ts'; // the exact join the feed's spawn performs
-if (!fs.existsSync(joined)) { console.error('missing: ' + joined); process.exit(1); }
-NODE
-# the feed (worktree copy) reads data/board.json through the selector: materialize a scratch board if
-# the worktree has none (the file is untracked live state; only what this smoke created is removed)
-if [ ! -f "$KAN/data/board.json" ]; then
-  node - "$FX/board.json" "$KAN/data/board.json" <<'NODE' || fail "scratch board build failed"
-const fs = require('fs');
-const b = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-const tickets = {};
-for (const r of b.rows || []) tickets[String(r.id)] = { id: String(r.id), subject: r.title, column: r.column, status: r.column === 'done' ? 'completed' : r.column === 'in_progress' ? 'in_progress' : 'pending', kind: r.kind || 'work', blockedBy: r.blockedBy || [], updatedAt: r.updatedAt, comments: [] };
-fs.writeFileSync(process.argv[3], JSON.stringify({ generatedAt: b.generatedAt, tickets }));
-NODE
-  CREATED_BOARD=1
-fi
-( cd "$KAN" && node node_modules/.bin/tsx scripts/kanban-lanes.ts ) > "$WORK/sel.json" 2>"$WORK/sel.err" \
-  || fail "selector run exited nonzero: $(head -1 "$WORK/sel.err")"
-node - "$WORK/sel.json" <<'NODE' || fail "selector output shape"
-const j = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
-if (!Array.isArray(j.lanes) || !Array.isArray(j.active) || !j.shelf || typeof j.done !== 'number' || j.source !== 'agent-kanban/scripts/kanban-lanes.ts') { console.error('bad selector payload'); process.exit(1); }
-NODE
+# --- #3520 area 23: lane parity is ledger-only. No selector spawn happens (the retired join would
+# have read data/board.json through kanban-lanes.ts), the summary reports laneSource == 'ledger',
+# and the retired --kanban-json seam is REFUSED as an unknown flag before any data read (fail closed).
 run > "$WORK/green-nokanban.json" 2>/dev/null || fail "green run without --kanban-json exited nonzero"
-node - "$WORK/green-nokanban.json" <<'NODE' || fail "laneSource is not kanban (the tracked selector did not answer)"
+node - "$WORK/green-nokanban.json" <<'NODE' || fail "laneSource is not ledger"
 const j = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
-if (j.laneSource !== 'kanban') { console.error('laneSource=' + j.laneSource); process.exit(1); }
+if (j.laneSource !== 'ledger') { console.error('laneSource=' + j.laneSource); process.exit(1); }
 NODE
+run --kanban-json "$FX/kanban.json" > "$WORK/refused.out" 2> "$WORK/refused.err"; rc_refused=$?
+[ "$rc_refused" = "2" ] || fail "--kanban-json exited $rc_refused (must be refused with exit 2)"
+command grep -q "unknown flag: --kanban-json" "$WORK/refused.err" || fail "--kanban-json refusal is not the unknown-flag guard"
 
 # --- GREEN: the worktree feed on FX — summary small, ticket lists in their own body, % on the cards
-run --kanban-json "$FX/kanban.json" > "$WORK/green.json" 2>/dev/null || fail "green run exited nonzero"
+run > "$WORK/green.json" 2>/dev/null || fail "green run exited nonzero"
 node "$SCRIPT" --board "$FX/board.json" --session "$SID" --ledger-dir "$WORK/ledger" --events-dir "$WORK/ledger" \
   --tasks-dir "$WORK/tasks" --now "$NOW" --focus-dir "$FOCUS_DIR" --focuses-only > "$WORK/focuses.json" 2>/dev/null \
   || fail "--focuses-only exited nonzero"
@@ -157,7 +139,7 @@ for (const f of stub) {
 }
 chk('body carries generatedAt', typeof body.generatedAt === 'string' && body.generatedAt);
 if (bad.length) { console.error('FAIL: ' + bad.join('; ')); process.exit(1); }
-console.log('size smoke: summary ' + JSON.stringify(green).length + ' bytes (cap 48000); the pre-fix blob on the same fixture ' + redN + ' bytes (>62000); ticket lists ride the #4 body; wtd fields integer on every card; tracked selector answers');
+console.log('size smoke: summary ' + JSON.stringify(green).length + ' bytes (cap 48000); the pre-fix blob on the same fixture ' + redN + ' bytes (>62000); ticket lists ride the #4 body; wtd fields integer on every card; laneSource ledger (#3520 area 23)');
 NODE
 
 # --- #3278 details arm: the #2 body (per-ticket description + step timeline) under the cap WITH
@@ -223,7 +205,7 @@ RED_DXLARGE="$(command grep -o 'board-live details (auto) too large: [0-9]*' "$W
 # (no network, no state write — the same print-and-exit pattern as --focus-body) on the today-shaped
 # fixture and on the doubled one; both must measure <= 50000 (headroom under the 60000 cap).
 dxrun() { # $1 = fixture dir; prints the #2 body on stdout
-  node "$SCRIPT" --board "$1/board.json" --kanban-json "$1/kanban.json" --session fx-dx \
+  node "$SCRIPT" --board "$1/board.json" --session fx-dx \
     --ledger-dir "$1/ledger" --events-dir "$1/ledger" --tasks-dir "$1/tasks" \
     --now "$NOW" --focus-dir "$FOCUS_DIR" --details-body
 }

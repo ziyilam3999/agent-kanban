@@ -1,12 +1,19 @@
 // Spike (#3072): export a slim board snapshot and PUT it to the private repo via the GitHub contents API.
 // Zero Claude tokens: plain node + gh. Usage: node board-live-push.mjs [session] [flags]
-// Tracked in agent-kanban (#3111 leg 2a) with the OLD lane rules intact. Seams (all default to today's live paths):
-//   --board <file>       board json (tickets map, or a rows array as the frozen fixtures use)
+// Tracked in agent-kanban (#3111 leg 2a). #3520 area 23 (2026-10-24): the OLD kanban lane rules are
+// RETIRED — lane parity reads the 3-role ledger only (laneSource is DERIVED: 'ledger' with no
+// board input, 'board' with the frozen fixture) and the live board.json
+// export snapshot is no longer an input (the Vercel kanban is paused). Seams:
+//   --board <file>       board json FIXTURE seam only (#3520 area 23): the live data/board.json
+//                        (the Vercel export snapshot) is no longer an input; without the flag no
+//                        board json is read at all — the lane rows, counts and parity are built
+//                        from the 3-role ledger (status-tables work pool + task store) and
+//                        laneSource reads 'ledger' (with the fixture: 'board')
 //   --session <sid>      session id (also: first positional, BOARD_SESSION, newest ledger dir)
 //   --ledger-dir <dir>   3-role ledger root (default ~/.claude/3role-ledger); status-tables reads it too
 //   --events-dir <dir>   step-log events root (default: the ledger dir; the old rules do not read events yet)
 //   --tasks-dir <dir>    task-store root (default ~/.claude/tasks); status-tables reads it too
-//   --kanban-json <file> frozen kanban selector state ({active, lanes}) fed to the parity block instead of spawning the selectors
+//   (--kanban-json retired #3520 area 23: lane parity reads the 3-role ledger only)
 //   --wiki-hub <dir>     wiki-hub checkout whose registry maps this repo to the child wiki hosting the focus pages (#3244)
 //   --jev-dir <dir>      private Jev store root (default ~/.claude/jev); the #3121 fixture smokes and the render harness redirect it
 //   --now <iso>          pin the clock (generatedAt, recency windows, status-tables --now)
@@ -24,7 +31,7 @@ import { execFileSync } from 'node:child_process';
 // PROGRESS_FOCUS_PROGRESS, which status-tables honours.
 const ARGV = process.argv.slice(2);
 const flagVal = (name) => { const i = ARGV.indexOf(name); return i >= 0 && ARGV[i + 1] && !ARGV[i + 1].startsWith('--') ? ARGV[i + 1] : null; };
-const VALUE_FLAGS = ['--focus-dir', '--board', '--session', '--ledger-dir', '--events-dir', '--tasks-dir', '--now', '--kanban-json', '--wiki-hub', '--jev-dir'];
+const VALUE_FLAGS = ['--focus-dir', '--board', '--session', '--ledger-dir', '--events-dir', '--tasks-dir', '--now', '--wiki-hub', '--jev-dir'];
 // #3272 F1: refuse any flag we do not know, BEFORE any data read or network call — an unknown flag must
 // never fall through to the real push (the pre-fix live copy honoured --focus-dir, ignored the new print
 // flags and pushed fixture data to the live board). The one legacy bare positional [session] id is kept.
@@ -63,8 +70,16 @@ if (WIKI_HUB) {
 }
 const REPO = 'ziyilam3999/agent-board-data';
 const FILE = 'board-live.json';
-const BOARD_FILE = path.resolve(flagVal('--board') || path.join(HOME, 'coding_projects/agent-kanban/data/board.json'));
-const board = JSON.parse(fs.readFileSync(BOARD_FILE, 'utf8'));
+// #3520 area 23 (2026-10-24): data/board.json (export-board.ts writes it, upload-board.ts pushes
+// it to Vercel) is RETIRED as a live input — the Vercel kanban is paused and lane parity reads the
+// 3-role ledger only (laneSource below). --board stays as the frozen-fixture seam the ai-brain
+// render harness and the frozen smokes use; with no flag the LEDGER block below builds the lane
+// rows, counts and parity from the owner readers (status-tables work pool + task store), so a
+// missing board.json is a ledger-sourced board, never an empty one.
+const BOARD_FLAG = flagVal('--board');
+const board = BOARD_FLAG
+  ? JSON.parse(fs.readFileSync(path.resolve(BOARD_FLAG), 'utf8'))
+  : { tickets: {} };
 // Frozen fixtures carry a rows array (id/title/column/stage/updatedAt); the live board carries a tickets map.
 if (!board.tickets && Array.isArray(board.rows)) {
   board.tickets = Object.fromEntries(board.rows.map((r) => [String(r.id), { id: r.id, subject: r.title || r.subject || '', column: r.column, status: r.column === 'done' ? 'completed' : (r.status || (r.column === 'todo' ? 'pending' : 'in_progress')), kind: r.kind || 'work', blockedBy: r.blockedBy || [], updatedAt: r.updatedAt, description: r.description || '' }]));
@@ -73,7 +88,7 @@ const doneIds = new Set(Object.values(board.tickets).filter((t) => t.status === 
 const tickets = Object.values(board.tickets)
   .filter((t) => t.status !== 'completed')
   .map((t) => ({ id: String(t.id), subject: t.subject, column: t.column, status: t.status, kind: t.kind || 'work', blockedBy: (t.blockedBy || []).map(String).filter((x) => !doneIds.has(x)).join(' '), doneBlockers: (t.blockedBy || []).map(String).filter((x) => doneIds.has(x)).join(' '), updatedAt: new Date(Number(t.updatedAt) || Date.parse(t.updatedAt)).toISOString() }));
-const snap = { generatedAt: new Date(NOW_MS).toISOString(), boardGeneratedAt: board.generatedAt, count: tickets.length, rows: tickets };
+let snap = { generatedAt: new Date(NOW_MS).toISOString(), boardGeneratedAt: board.generatedAt, count: tickets.length, rows: tickets };
 
 // #3072 option A: slim summary into one private issue body (the built-in Dashboard reads it via issue_read).
 const isWork = (t) => (t.kind || "work") === "work";
@@ -85,7 +100,8 @@ const counts = {
   parked: tickets.filter((t) => t.kind === 'parked').length,
   bookkeeping: tickets.filter((t) => t.kind === 'bookkeeping').length,
 };
-const active = tickets.filter((t) => isWork(t) && (t.column === 'in_progress' || t.column === 'in_review' || (t.column === 'todo' && t.blockedBy)))
+// `snap`/`active` are reassignable: with no --board fixture the ledger block below re-derives them.
+let active = tickets.filter((t) => isWork(t) && (t.column === 'in_progress' || t.column === 'in_review' || (t.column === 'todo' && t.blockedBy)))
   .map((t) => ({ id: t.id, subject: t.subject.slice(0, 220), column: t.column, kind: t.kind, blockedBy: t.blockedBy, updatedAt: t.updatedAt }));
 
 // Lanes, seats and Jev (operator ask 2026-10-09). Session = argv[2] or BOARD_SESSION.
@@ -186,7 +202,47 @@ const zaiModel = (id, role) => {
   zaiModelCache.set(k, m);
   return m;
 };
-const lanes = tickets.filter((t) => t.column === 'in_progress' || t.column === 'in_review').map((t) => {
+// #3520 area 23 fix round 1 (HIGH-1): with NO --board fixture the lane rows, counts and parity are
+// built from the 3-role LEDGER itself — the status-tables WORK pool (the owner reader) joined with
+// the task store for subject/blockers/updatedAt — so board.json absent is a ledger-sourced board,
+// never an empty one. An active ledger lane renders as column in_progress.
+// Fix round 2 (LOW-C): the reader's SHIP-TAIL pool (tickets waiting to merge) is ledger-owned too,
+// so those lanes are CARRIED (rendered as the board's in_review column, and counted in
+// counts.in_review). The remaining counts (blocked / todo_work / parked / bookkeeping) have NO
+// ledger-side owner yet (area 24's owner-reader redesign owns them) — they are published as null
+// with their names in countsLedgerGaps ("not available in ledger mode"), NEVER a silent 0.
+// INPUT-BOUND: one pass over the reader's own bounded output — a lane pool longer than
+// LEDGER_LANE_CAP rows fails CLOSED and LOUD (fix round 2, LOW-D: a non-zero exit with the reason
+// on stderr; nothing is published, and never an empty board pretending to be the truth).
+const LEDGER_LANE_CAP = 200;
+const laneSource = BOARD_FLAG ? 'board' : 'ledger';
+let laneTickets = tickets;
+let countsLedgerGaps = null;
+if (!BOARD_FLAG) {
+  const stRows = stJson && stJson.lanes && Array.isArray(stJson.lanes.rows) ? stJson.lanes.rows : [];
+  const pool = stRows.filter((x) => x.pool === 'work' || x.pool === 'ship_tail');
+  if (pool.length > LEDGER_LANE_CAP) {
+    console.error(`board-live-push: refusing to publish — the ledger lane pool is ${pool.length} rows, over the LEDGER_LANE_CAP of ${LEDGER_LANE_CAP} (fail closed and loud; nothing published)`);
+    process.exit(1);
+  }
+  laneTickets = pool.map((x) => {
+    const waitingToMerge = x.pool === 'ship_tail';
+    let t = null; try { t = JSON.parse(fs.readFileSync(path.join(TASKS_DIR, SID || '', String(x.id) + '.json'), 'utf8')); } catch {}
+    const last = ledger(String(x.id)).at(-1);
+    const subject = (t && t.subject) || (x.what && x.what !== '(subject unavailable)' ? x.what : '#' + x.id);
+    const updatedMs = (t && (Number(t.updatedAt) || Date.parse(t.updatedAt))) || Date.parse((last && (last.closedAt || last.ts)) || '') || NOW_MS;
+    return { id: String(x.id), subject, column: waitingToMerge ? 'in_review' : 'in_progress', status: waitingToMerge ? 'in_review' : 'in_progress', kind: 'work',
+      blockedBy: ((t && t.blockedBy) || []).map(String).filter((x2) => x2 !== '').join(' '), doneBlockers: '',
+      updatedAt: new Date(updatedMs).toISOString() };
+  });
+  snap = { generatedAt: snap.generatedAt, boardGeneratedAt: null, count: laneTickets.length, rows: laneTickets };
+  counts.in_progress = laneTickets.filter((t) => t.column === 'in_progress' && isWork(t)).length;
+  counts.in_review = laneTickets.filter((t) => t.column === 'in_review' && isWork(t)).length;
+  counts.blocked = null; counts.todo_work = null; counts.parked = null; counts.bookkeeping = null;
+  countsLedgerGaps = ['blocked', 'todo_work', 'parked', 'bookkeeping'];
+  active = laneTickets.filter(isWork).map((t) => ({ id: t.id, subject: t.subject.slice(0, 220), column: t.column, kind: t.kind, blockedBy: t.blockedBy, updatedAt: t.updatedAt }));
+}
+const lanes = laneTickets.filter((t) => t.column === 'in_progress' || t.column === 'in_review').map((t) => {
   // Stage = the furthest pipeline step that has a row (a late bookkeeping append to an earlier role, e.g. an
   // executor artifact re-pin after execution-review, must not move the lane backwards).
   const all = ledger(t.id);
@@ -206,42 +262,14 @@ const lanes = tickets.filter((t) => t.column === 'in_progress' || t.column === '
     jev: h ? { role: h.role, status: h.jev_status, top3: (h.jev_top3 || []).map(scrub), haikuTop3: (h.haiku_top3 || []).map(scrub), ts: h.ts } : null,
   };
 });
-// Kanban parity (operator 2026-10-09): lanes, liveness and current stage come from the kanban's OWN
-// selectors (lib/active computeActiveIds + lib/lanes deriveLanes), so the two boards never disagree.
-let kb = null;
-const KANBAN_JSON = flagVal('--kanban-json');
-if (KANBAN_JSON) { try { kb = JSON.parse(fs.readFileSync(path.resolve(KANBAN_JSON), 'utf8')); } catch (e) { console.error('bad --kanban-json: ' + e.message); process.exit(2); } }
-else try { kb = JSON.parse(execFileSync(path.join(os.homedir(), 'coding_projects/agent-kanban/node_modules/.bin/tsx'), [path.join(path.dirname(new URL(import.meta.url).pathname), 'kanban-lanes.ts')], { encoding: 'utf8', timeout: 60000, stdio: ['ignore', 'pipe', 'ignore'] })); } catch { kb = null; }
-const PIPE = ['planner', 'plan-review', 'executor', 'execution-review'];
-if (kb) {
-  const byId = new Map(kb.lanes.map((x) => [String(x.id), x]));
-  const act = new Set(kb.active.map(String));
-  for (const l of lanes) {
-    const k = byId.get(l.id);
-    l.recent = !!k;
-    l.live = act.has(l.id);
-    if (k && k.stage != null) {
-      let cur = PIPE[k.stage];
-      const parts = l.flow.split(',').filter((x) => !x.startsWith('cur:'));
-      const st = Object.fromEntries(parts.map((x) => x.split(':')));
-      const lastRow = SID ? lastLedgerRow(l.id, SID) : null;
-      const open = lastRow && String(lastRow.role) === cur && (lastRow.pending === true || !lastRow.closedAt);
-      if (l.live && (st[cur] === 'none' || open)) st[cur] = 'running';
-      // A newer round wins over the kanban's remembered failure: only mark a step failed when that step's
-      // latest ledger row really is a FAIL/NEEDS-WORK, and move the current step forward when the next step
-      // has a row newer than the current step's latest row (e.g. plan-review round 2 after a planner fold).
-      const rowsL = ledger(l.id);
-      const lastOf = {}; for (const r of rowsL) lastOf[String(r.role)] = r;
-      const tsOf = (r) => Date.parse(r && (r.ts || r.openedAt || r.closedAt) || 0) || 0;
-      const isFail = (r) => !!r && /FAIL|NEEDS/.test(String(r.verdict ?? '').toUpperCase());
-      if (k.reworking && k.failedStage != null && isFail(lastOf[PIPE[k.failedStage]])) st[PIPE[k.failedStage]] = 'fail';
-      let ci = PIPE.indexOf(cur);
-      while (ci >= 0 && ci + 1 < PIPE.length && lastOf[PIPE[ci + 1]] && tsOf(lastOf[PIPE[ci + 1]]) > tsOf(lastOf[PIPE[ci]])) ci++;
-      if (ci >= 0 && PIPE[ci] !== cur) { st[cur] = st[cur] === 'running' ? 'done' : (st[cur] || 'done'); cur = PIPE[ci]; const r = lastOf[cur]; st[cur] = (r.pending === true || !r.closedAt) ? (l.live ? 'running' : 'stopped') : (isFail(r) ? 'fail' : (/review/.test(cur) ? 'pass' : 'done')); }
-      l.flow = FLOW.map((r) => r + ':' + (st[r] || 'none')).concat(['cur:' + cur]).join(',');
-    }
-  }
-} else for (const l of lanes) l.recent = l.live || (l.since && NOW_MS - Date.parse(l.since) < 12 * 3600 * 1000);
+// Lane parity (#3520 area 23, 2026-10-24): the 3-role LEDGER is the only source — the kanban
+// selector parity block (kanban-lanes.ts spawn / --kanban-json: lanes, liveness and current stage
+// from the kanban's OWN remembered state, so laneSource could read 'kanban') is retired with the
+// Vercel pause. laneSource is DERIVED from where the lane rows really came from (the frozen --board
+// fixture reads 'board'; with no board the ledger block above built them and it reads 'ledger') —
+// never a constant. Recency = live per status-tables (the ledger owner reader) or a ledger row
+// timestamped inside the last 12 h.
+for (const l of lanes) l.recent = l.live || (l.since && NOW_MS - Date.parse(l.since) < 12 * 3600 * 1000);
 // Stopgap until #3098 (step log): status-tables sees Agent-tool spawns and orchestrator-held steps that the kanban
 // misses (no ledger row until a seat finishes), so a ticket it lists as a live work lane is a lane, running its stage.
 for (const l of lanes) {
@@ -372,7 +400,7 @@ const fileHint = hintLog.capped ? fhQuiet('row log over the count cap; not count
     ended: fhEnded,
   };
 const jev = { lessonMerge, fileHint };
-const shelf = kb ? kb.shelf : {};
+const shelf = {}; // kanban selector shelf retired with the parity block (#3520 area 23); shelfRows below still come from the --board fixture
 // Detail sheet (kanban Drawer parity): description + black-box timeline, JSON-encoded strings so the
 // Dashboard's cell flattening cannot mangle them. Timeline only for lane / in-progress / in-review rows.
 const descOf = new Map(Object.values(board.tickets).map((t) => [String(t.id), ((d) => d.length > 420 ? d.slice(0, 419).replace(/\s+\S*$/, '') + '…' : d)(scrub(String(t.description || '')))]));
@@ -505,7 +533,7 @@ try {
   };
 } catch (e) { console.error('jevResearch: ' + (e && e.message)); }
 const laneCap = (() => { const m = /^work_ceiling=(\d+)$/m.exec(run(["hooks/3role-ledger.mjs", "resolve-mode"])); return m ? Number(m[1]) : 4; })();
-const summary = JSON.stringify({ focuses, focusTotals, jevResearch, generatedAt: snap.generatedAt, counts, rows: active, shelfRows, seats, lanes: lanes.filter((l) => l.recent), laneCap, jev, shelf, laneSource: kb ? 'kanban' : 'ledger' });
+const summary = JSON.stringify({ focuses, focusTotals, jevResearch, generatedAt: snap.generatedAt, counts, rows: active, shelfRows, seats, lanes: lanes.filter((l) => l.recent), laneCap, jev, shelf, laneSource, ...(countsLedgerGaps ? { countsLedgerGaps } : {}) });
 // #3278: the #2 body carries ONLY the loader's read set — the page's details loader reads v.details
 // (per entry d/tl) and never the top-level generatedAt (the stale-body check compares #1's against
 // #4's; the render harness fixture already omits it), so it is dropped for headroom.

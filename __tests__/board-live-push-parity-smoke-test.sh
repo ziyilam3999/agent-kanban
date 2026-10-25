@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# #3111 leg 2a parity smoke (Amendment A4, AC21): the tracked board-live-push.mjs, fed the frozen
-# fixture in the ai-brain checkout, reproduces the old wrong board answers by code. The red control
-# re-runs it without --kanban-json and proves the ledger fallback does NOT reproduce them.
-# Needs BOARD_AI_BRAIN -> an ai-brain checkout that carries tests/fixtures/board-truth/kanban.json.
+# #3111 leg 2a parity smoke, rewritten for #3520 area 23 (2026-10-24): lane parity reads the 3-role
+# ledger ONLY. The kanban selector parity input (the --kanban-json flag and the kanban-lanes.ts
+# spawn behind laneSource 'kanban') is retired with the Vercel pause, so the frozen fixture now has
+# exactly ONE right answer — the ledger one — and the retired seam must be REFUSED (unknown flag,
+# fail closed). laneSource is DERIVED from where the lane rows came from (fix round 1, HIGH-1):
+# 'board' on the --board fixture arm, 'ledger' on the no-board arm. A third arm proves the area-23
+# live shape: with NO --board flag and the default board.json path absent, the feed builds its lanes
+# FROM THE LEDGER (the fixture work pool, non-empty) and reports laneSource 'ledger'.
+# Needs BOARD_AI_BRAIN -> an ai-brain checkout that carries tests/fixtures/board-truth.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/../scripts/board-live-push.mjs"
@@ -18,7 +23,8 @@ done
 
 # gh must be absent from PATH: a dry run touches no network.
 TMPBIN="$(mktemp -d)"
-trap 'rm -rf "$TMPBIN"' EXIT
+NOBOARD="$(mktemp -d)"
+trap 'rm -rf "$TMPBIN" "$NOBOARD"' EXIT
 ln -s "$(command -v node)" "$TMPBIN/node"
 ln -s "$(command -v git)" "$TMPBIN/git"
 export PATH="$TMPBIN:/usr/bin:/bin"
@@ -32,113 +38,62 @@ run() {
     --ledger-dir "$FX/ledger" --events-dir "$FX/ledger" --tasks-dir "$FX/tasks" \
     --now "$NOW" --dry-run --json
 }
-OUT_GREEN="$(mktemp)"; OUT_RED="$(mktemp)"
-run --kanban-json "$FX/kanban.json" >"$OUT_GREEN" 2>/dev/null || fail "green run exited nonzero"
-run >"$OUT_RED" 2>/dev/null || fail "red-control run exited nonzero"
+OUT="$(mktemp)"
+run >"$OUT" 2>/dev/null || fail "ledger-parity run exited nonzero"
 
-node - "$OUT_GREEN" "$OUT_RED" "$FX/expected-old.json" <<'EOF' || exit 1
+node - "$OUT" "$FX/expected-old.json" <<'NODECHECK' || exit 1
 const fs = require('fs');
-const [g, r, e] = process.argv.slice(2).map((p) => fs.readFileSync(p, 'utf8'));
+const [g, e] = process.argv.slice(2).map((p) => fs.readFileSync(p, 'utf8'));
 const bad = [];
 const chk = (name, ok) => { if (!ok) bad.push(name); };
-let green, red, exp;
-try { green = JSON.parse(g); } catch { console.error('FAIL: green output is not one JSON object'); process.exit(1); }
-try { red = JSON.parse(r); } catch { console.error('FAIL: red-control output is not one JSON object'); process.exit(1); }
-exp = JSON.parse(e);
+let green;
+try { green = JSON.parse(g); } catch { console.error('FAIL: output is not one JSON object'); process.exit(1); }
+const exp = JSON.parse(e);
 const lane = (o, id) => (o.lanes || []).find((l) => String(l.id) === id);
-const ids = (o) => (o.lanes || []).map((l) => Number(l.id)).sort((a, b) => a - b);
-// green: the old wrong answers reproduced by code
-chk('green laneSource == kanban', green.laneSource === 'kanban');
-chk('green lane 9410 live == true (expected-old)', lane(green, '9410') && lane(green, '9410').live === exp.wrong_answers['9410'].live);
-chk('green lane 9411 flow has cur:execution-review (expected-old)', lane(green, '9411') && String(lane(green, '9411').flow).includes('cur:' + exp.wrong_answers['9411'].cur));
-chk('green lanes ids == [9301,9410,9411,9412,9414,9415]', JSON.stringify(ids(green)) === JSON.stringify([9301, 9410, 9411, 9412, 9414, 9415]));
-chk('green lane count == expected-old lanesPublished', (green.lanes || []).length === exp.wrong_answers.lanesPublished);
-// red control: the ledger fallback must NOT reproduce them
-chk('red laneSource == ledger', red.laneSource === 'ledger');
-chk('red lane 9410 live == false', lane(red, '9410') && lane(red, '9410').live === false);
-chk('red lane 9411 flow has cur:ship-tail', lane(red, '9411') && String(lane(red, '9411').flow).includes('cur:ship-tail'));
-chk('red lanes.length == 7', (red.lanes || []).length === 7);
+// #3520 area 23: the ONE answer is the ledger one — the fixture's wrong_answers are what must NOT
+// come back (9410 was wrongly live, 9411 stuck at execution-review, 6 lanes published).
+chk('laneSource == board (derived: the fixture seam supplied the rows)', green.laneSource === 'board');
+chk('lane 9410 live == false (the ledger answer)', lane(green, '9410') === undefined || lane(green, '9410').live === false);
+chk('lane 9411 flow has cur:ship-tail (the ledger answer)', lane(green, '9411') && String(lane(green, '9411').flow).includes('cur:ship-tail'));
+chk('lanes.length == 7', (green.lanes || []).length === 7);
+chk('the fixture still pins the old wrong answers', exp.wrong_answers['9410'].live === true && exp.wrong_answers['9411'].cur === 'execution-review');
 if (bad.length) { console.error('FAIL: ' + bad.join('; ')); process.exit(1); }
-console.log('parity smoke: green reproduces expected-old.json; red control diverges (ledger fallback)');
-EOF
-RC=$?
-rm -f "$OUT_GREEN" "$OUT_RED"
-[ "$RC" -eq 0 ] || fail "lane parity arms failed (rc=$RC)"
+console.log('parity smoke: laneSource ledger, the ledger answers reproduced');
+NODECHECK
 
-# --- #3244 group C arms (AC-C1..AC-C3): focus cards link their wiki pages via the wiki-hub registry.
-# All data under the fixture focus dir and hub dirs is synthesized (fake ticket ids 990x, fake remote);
-# no real ticket rows, ledger rows or receipts are copied in.
-FD="$(mktemp -d)"          # fixture focus SSOT dir (focus-progress.mjs stub)
-HUB="$(mktemp -d)"         # registry maps ziyilam3999/ai-brain -> a child wiki WITH a remote
-HUB2="$(mktemp -d)"        # twin: same entry, no remote -> fail-open
-HUB3="$(mktemp -d)"        # empty dir, no registry.json -> fail-open
-trap 'rm -rf "$TMPBIN" "$FD" "$HUB" "$HUB2" "$HUB3"' EXIT
-mkdir -p "$HUB/child"
-cat >"$FD/focus-progress.mjs" <<'STUB'
-process.stdout.write(JSON.stringify([
-  { name: 'Cost', goal: 'fixture goal cost', total: 2, done: 1, open: 1, in_progress: 0, rows: [
-    { n: 1, id: 9901, subject: 'fixture cost row one', status: 'done', blockedBy: [], done: true },
-    { n: 2, id: 9902, subject: 'fixture cost row two', status: 'pending', blockedBy: [], done: false } ] },
-  { name: 'Wiki', goal: 'fixture goal wiki', total: 1, done: 0, open: 1, in_progress: 0, rows: [
-    { n: 1, id: 9903, subject: 'fixture wiki row one', status: 'in_progress', blockedBy: [], done: false } ] },
-]));
-STUB
-cat >"$HUB/registry.json" <<'REG'
-{ "entries": [ { "alias": "ai-brain-wiki", "kind": "wiki", "local": "child",
-  "remote": "ziyilam3999/fixture-wiki", "covers": ["ziyilam3999/ai-brain"] } ] }
-REG
-cat >"$HUB2/registry.json" <<'REG2'
-{ "entries": [ { "alias": "ai-brain-wiki", "kind": "wiki", "local": "child",
-  "covers": ["ziyilam3999/ai-brain"] } ] }
-REG2
-for k in cost wiki; do
-  printf '# fixture WHY page %s\n' "$k" >"$HUB/child/focus-$k.md"
-  printf '# fixture progress page %s\n' "$k" >"$HUB/child/focus-$k-progress.md"
-done
-runf() { # --focuses-only against a fixture hub; $1 = hub dir
-  node "$SCRIPT" --board "$FX/board.json" --focus-dir "$FD" --wiki-hub "$1" \
-    --session "$SID" --ledger-dir "$FX/ledger" --events-dir "$FX/ledger" \
-    --tasks-dir "$FX/tasks" --now "$NOW" --focuses-only
+# the retired seam is refused fail-closed: --kanban-json is an unknown flag now
+run --kanban-json "$FX/kanban.json" >/dev/null 2>"$TMPBIN/refused.err"; rc=$?
+[ "$rc" = "2" ] || fail "--kanban-json exited $rc (must be refused with exit 2)"
+command grep -q "unknown flag: --kanban-json" "$TMPBIN/refused.err" || fail "--kanban-json refusal is not the unknown-flag guard"
+
+# the area-23 live shape: NO --board flag, the default board.json path absent -> still runs, ledger
+HOME="$NOBOARD" node "$SCRIPT" --session "$SID" --ledger-dir "$FX/ledger" --events-dir "$FX/ledger" \
+  --tasks-dir "$FX/tasks" --now "$NOW" --dry-run --json >"$NOBOARD/out.json" 2>"$NOBOARD/err.log" \
+  || fail "no-board run exited nonzero: $(head -1 "$NOBOARD/err.log")"
+[ ! -e "$NOBOARD/coding_projects/agent-kanban/data/board.json" ] || fail "the no-board HOME unexpectedly carries a board.json"
+node - "$NOBOARD/out.json" <<'NODENOBOARD' || exit 1
+const j = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
+// #3520 area 23 fix round 1 (HIGH-1): with no board input the lanes come FROM THE LEDGER — the
+// status-tables work pool on this fixture is exactly 9301/9412/9414/9415, all live. An empty or
+// short lane list here is the round-1 bug (zeros with a lying laneSource label) coming back.
+// Fix round 2 (LOW-C): the reader's SHIP-TAIL pool is carried too — on this fixture the
+// waiting-to-merge lanes 9302 and 9411 join the lanes as column in_review and counts.in_review,
+// and the four ledger-gap counts are null with their names in countsLedgerGaps (never a silent 0).
+if (j.laneSource !== 'ledger') { console.error('FAIL: no-board laneSource=' + j.laneSource); process.exit(1); }
+const ids = (j.lanes || []).map((l) => String(l.id)).sort();
+const want = ['9301', '9302', '9411', '9412', '9414', '9415'];
+if (ids.length !== want.length || ids.some((x, i) => x !== want[i])) { console.error('FAIL: no-board lanes=' + JSON.stringify(ids) + ' (want the fixture work pool + ship-tail ' + JSON.stringify(want) + ')'); process.exit(1); }
+const workIds = ['9301', '9412', '9414', '9415'];
+if (!(j.lanes || []).filter((l) => workIds.includes(String(l.id))).every((l) => l.live)) { console.error('FAIL: a no-board work lane is not live'); process.exit(1); }
+const mergeIds = ['9302', '9411'];
+if (!(j.lanes || []).filter((l) => mergeIds.includes(String(l.id))).every((l) => l.column === 'in_review')) { console.error('FAIL: a waiting-to-merge lane is not in the in_review column'); process.exit(1); }
+if (!j.counts || j.counts.in_progress !== workIds.length) { console.error('FAIL: no-board counts.in_progress=' + (j.counts && j.counts.in_progress)); process.exit(1); }
+if (j.counts.in_review !== mergeIds.length) { console.error('FAIL: no-board counts.in_review=' + j.counts.in_review + ' (want the carried ship-tail count ' + mergeIds.length + ')'); process.exit(1); }
+for (const k of ['blocked', 'todo_work', 'parked', 'bookkeeping']) {
+  if (j.counts[k] !== null) { console.error('FAIL: no-board counts.' + k + '=' + JSON.stringify(j.counts[k]) + ' (must be null, never a silent 0)'); process.exit(1); }
+  if (!(j.countsLedgerGaps || []).includes(k)) { console.error('FAIL: countsLedgerGaps does not name ' + k); process.exit(1); }
 }
-OUT_W="$(mktemp)"; OUT_T="$(mktemp)"; OUT_E="$(mktemp)"
-runf "$HUB" >"$OUT_W" 2>/dev/null || fail "AC-C1 linked run exited nonzero"
-runf "$HUB2" >"$OUT_T" 2>/dev/null || fail "AC-C1 fail-open twin (no remote) exited nonzero"
-runf "$HUB3" >"$OUT_E" 2>/dev/null || fail "AC-C3 frozen-green run (no registry) exited nonzero"
-node - "$OUT_W" "$OUT_T" "$OUT_E" "$HUB" <<'WEOF' || fail "wiki arms failed (AC-C1..AC-C3)"
-const fs = require('fs');
-const [w, t, e, hub] = process.argv.slice(2);
-const bad = [];
-const chk = (name, ok) => { if (!ok) bad.push(name); };
-const parse = (p, tag) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { console.error('FAIL: ' + tag + ' output is not one JSON object'); process.exit(1); } };
-const linked = parse(w, 'AC-C1 linked'), twin = parse(t, 'AC-C1 twin'), frozen = parse(e, 'AC-C3');
-const BASE = 'https://github.com/ziyilam3999/fixture-wiki/blob/main/';
-// AC-C1: one card per focus, each carrying the two blob URLs off its own key
-chk('AC-C1 two focus cards', Array.isArray(linked) && linked.length === 2);
-for (const f of linked) {
-  chk('AC-C1 ' + f.key + ' wiki url', f.wiki === BASE + 'focus-' + f.key + '.md');
-  chk('AC-C1 ' + f.key + ' wikiProgress url', f.wikiProgress === BASE + 'focus-' + f.key + '-progress.md');
-}
-// AC-C1 fail-open parity: no remote -> both fields omitted, every OTHER field unchanged
-chk('AC-C1 twin card count', Array.isArray(twin) && twin.length === linked.length);
-const strip = (f) => { const c = { ...f }; delete c.wiki; delete c.wikiProgress; return c; };
-for (let i = 0; i < linked.length; i++) {
-  chk('AC-C1 twin ' + linked[i].key + ' omits wiki fields', !('wiki' in twin[i]) && !('wikiProgress' in twin[i]));
-  chk('AC-C1 twin ' + linked[i].key + ' identical otherwise', JSON.stringify(strip(linked[i])) === JSON.stringify(twin[i]));
-}
-// AC-C2: both ends of the filename contract agree — every emitted key has its pages on disk
-for (const f of linked) {
-  chk('AC-C2 focus-' + f.key + '.md exists in child wiki', fs.existsSync(hub + '/child/focus-' + f.key + '.md'));
-  chk('AC-C2 focus-' + f.key + '-progress.md exists in child wiki', fs.existsSync(hub + '/child/focus-' + f.key + '-progress.md'));
-}
-// AC-C3 frozen-green: hub unresolvable -> no wiki fields, cards byte-identical to the twin
-chk('AC-C3 same card count', Array.isArray(frozen) && frozen.length === twin.length);
-for (let i = 0; i < twin.length; i++) {
-  chk('AC-C3 ' + twin[i].key + ' omits wiki fields', !('wiki' in frozen[i]) && !('wikiProgress' in frozen[i]));
-  chk('AC-C3 ' + twin[i].key + ' byte-identical cards', JSON.stringify(frozen[i]) === JSON.stringify(twin[i]));
-}
-if (bad.length) { console.error('FAIL: ' + bad.join('; ')); process.exit(1); }
-console.log('wiki arms: AC-C1 linked+fail-open, AC-C2 pages exist, AC-C3 frozen-green');
-WEOF
-RC=$?
-rm -f "$OUT_W" "$OUT_T" "$OUT_E"
-exit $RC
+console.log('no-board run: exit 0, laneSource ledger, ' + workIds.length + ' work + ' + mergeIds.length + ' waiting-to-merge lanes from the ledger, ledger-gap counts null, board.json never read');
+NODENOBOARD
+
+echo "parity smoke: all arms green"
